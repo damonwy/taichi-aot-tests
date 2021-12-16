@@ -6,10 +6,11 @@
 #include <android/sensor.h>
 #include <jni.h>
 
+#include <taichi/backends/vulkan/vulkan_program.h>
 #include <taichi/backends/vulkan/vulkan_common.h>
 #include <taichi/backends/vulkan/vulkan_loader.h>
-#include <taichi/backends/vulkan/vulkan_program.h>
-#include <taichi/program/context.h>
+#include <taichi/backends/vulkan/aot_module_loader_impl.h>
+
 
 #include <assert.h>
 #include <map>
@@ -46,15 +47,15 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env, jclass,
                                                         jobject assets,
                                                         jobject surface) {
+    ANativeWindow *native_window = ANativeWindow_fromSurface(env, surface);
+    taichi::lang::vulkan::AotModuleLoaderImpl aot_loader("/data/local/tmp/mpm88");
+
     // Initialize our Vulkan Program pipeline
     taichi::uint64 *result_buffer{nullptr};
     taichi::lang::RuntimeContext host_ctx;
-    taichi::lang::CompileConfig config = taichi::lang::default_compile_config;
-    config.arch = taichi::lang::Arch::vulkan;
 
-    taichi::lang::VulkanProgramImpl program(config, "/data/local/tmp/mpm88");
     auto memory_pool =
-        std::make_unique<taichi::lang::MemoryPool>(config.arch, nullptr);
+        std::make_unique<taichi::lang::MemoryPool>(taichi::lang::Arch::vulkan, nullptr);
     result_buffer = (taichi::uint64 *)memory_pool->allocate(
         sizeof(taichi::uint64) * taichi_result_buffer_entries, 8);
 
@@ -77,17 +78,17 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env, jclass,
     // Retrieve kernels/fields/etc from AOT module so we can initialize our
     // runtime
     taichi::lang::vulkan::VkRuntime::RegisterParams init_kernel, substep_kernel;
-    bool ret = program.get_kernel("init", init_kernel);
+    bool ret = aot_loader.get_kernel("init", init_kernel);
     if (!ret) {
         ALOGE("Cannot find 'init' kernel\n");
         return;
     }
-    ret = program.get_kernel("substep", substep_kernel);
+    ret = aot_loader.get_kernel("substep", substep_kernel);
     if (!ret) {
         ALOGE("Cannot find 'substep' kernel\n");
         return;
     }
-    auto root_size = program.get_root_size();
+    auto root_size = aot_loader.get_root_size();
     ALOGI("root buffer size=%d\n", root_size);
 
     vulkan_runtime->add_root_buffer(root_size);

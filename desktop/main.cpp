@@ -1,10 +1,10 @@
 #include <signal.h>
 #include <iostream>
 
-#include <taichi/backends/vulkan/vulkan_common.h>
 #include <taichi/backends/vulkan/vulkan_program.h>
+#include <taichi/backends/vulkan/vulkan_common.h>
 #include <taichi/backends/vulkan/vulkan_loader.h>
-#include <taichi/program/context.h>
+#include <taichi/backends/vulkan/aot_module_loader_impl.h>
 #include <taichi/gui/gui.h>
 
 std::vector<std::string> get_required_instance_extensions() {
@@ -38,7 +38,7 @@ int main() {
     taichi::lang::CompileConfig config = taichi::lang::default_compile_config;
     config.arch = taichi::lang::Arch::vulkan;
 
-    taichi::lang::VulkanProgramImpl program(config, "../mpm88");
+    taichi::lang::vulkan::AotModuleLoaderImpl aot_loader("../mpm88");
     auto memory_pool = std::make_unique<taichi::lang::MemoryPool>(config.arch, nullptr);
     result_buffer = (taichi::uint64 *)memory_pool->allocate(sizeof(taichi::uint64) * taichi_result_buffer_entries, 8);
 
@@ -58,17 +58,17 @@ int main() {
     // Retrieve kernels/fields/etc from AOT module so we can initialize our
     // runtime
     taichi::lang::vulkan::VkRuntime::RegisterParams init_kernel, substep_kernel;
-    bool ret = program.get_kernel("init", init_kernel);
+    bool ret = aot_loader.get_kernel("init", init_kernel);
     if (!ret) {
         printf("Cannot find 'init' kernel\n");
         return -1;
     }
-    ret = program.get_kernel("substep", substep_kernel);
+    ret = aot_loader.get_kernel("substep", substep_kernel);
     if (!ret) {
         printf("Cannot find 'substep' kernel\n");
         return -1;
     }
-    auto root_size = program.get_root_size();
+    auto root_size = aot_loader.get_root_size();
     printf("root buffer size=%d\n", root_size);
 
     vulkan_runtime->add_root_buffer(root_size);
