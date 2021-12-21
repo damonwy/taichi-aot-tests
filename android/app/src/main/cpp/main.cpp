@@ -212,7 +212,7 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   f_info.field_source = taichi::ui::FieldSource::TaichiVulkan;
   f_info.dtype = taichi::lang::PrimitiveType::f32;
   f_info.snode = nullptr;
-  f_info.dalloc = dalloc_circles;
+  f_info.dev_alloc = dalloc_circles;
 
   taichi::ui::CirclesInfo circles;
   circles.renderable_info.has_per_vertex_color = false;
