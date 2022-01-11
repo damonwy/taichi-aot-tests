@@ -7,6 +7,8 @@
 #include <taichi/backends/vulkan/aot_module_loader_impl.h>
 #include <taichi/gui/gui.h>
 
+#include <inttypes.h>
+
 std::vector<std::string> get_required_instance_extensions() {
   uint32_t glfw_ext_count = 0;
   const char **glfw_extensions;
@@ -75,11 +77,17 @@ int main() {
     auto init_kernel_handle = vulkan_runtime->register_taichi_kernel(init_kernel);
     auto substep_kernel_handle = vulkan_runtime->register_taichi_kernel(substep_kernel);
 
+    static std::chrono::steady_clock::time_point start;
+    start = std::chrono::steady_clock::now();
+
     //
     // Run MPM88 from AOT module similar to Python code
     //
     vulkan_runtime->launch_kernel(init_kernel_handle, &host_ctx);
     vulkan_runtime->synchronize();
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+    int64_t cpu_time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+    printf("Init CPU Time: %" PRId64 "ns \n", cpu_time);
 
     // Sanity check to make sure the shaders are running properly, we should have the same float
     // values as the python scripts
@@ -94,13 +102,19 @@ int main() {
 
     while (1) {
         canvas.clear(0x112F41);
-        
+
+        start = std::chrono  ::steady_clock::now();
+
         for (int i = 0; i < 50; i++) {
             vulkan_runtime->launch_kernel(substep_kernel_handle, &host_ctx);
         }
         vulkan_runtime->synchronize();
 
         vulkan_runtime->read_memory((uint8_t*) x, 0, n_particles * 2 * sizeof(taichi::float32));
+
+        end = std::chrono::steady_clock::now();
+        cpu_time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+        printf("CPU Time during execution: %" PRId64 "ns\n", cpu_time);
 
         for (int i = 0; i < n_particles * 2; ++i) {
             x[i] *= 512;

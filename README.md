@@ -26,6 +26,7 @@ cd android
 adb install ./app/build/outputs/apk/debug/app-debug.apk
 adb push ../mpm88 /data/local/tmp/
 adb shell chmod -R 777 /data/local/tmp/mpm88/
+adb push $TAICHI_REPO_DIR/python/taichi/shaders /data/local/tmp/
 ```
 
 Taichi built with
