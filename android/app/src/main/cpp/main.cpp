@@ -179,6 +179,9 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   // Clear the background
   renderer->set_background_color({0.6, 0.6, 0.6});
 
+  // timer starts before launch kernel
+  auto start = std::chrono  ::steady_clock::now();
+
   // Run 'substep' 50 times
   for (int i = 0; i < 50; i++) {
     vulkan_runtime->launch_kernel(substep_kernel_handle, &host_ctx);
@@ -189,6 +192,12 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   // @TODO: Skip this with support of NdArray as we will be able to specify 'dalloc_circles'
   // in the host_ctx before running the kernel, allowing the data to be updated automatically
   vulkan_runtime->synchronize();
+
+  // timer ends after synchronization
+  auto end = std::chrono::steady_clock::now();
+  auto cpu_time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+  ALOGI("Execution time is %" PRId64 "ns\n", cpu_time);
+
   vulkan_runtime->read_memory((uint8_t *)x, 0,
                               NR_PARTICLES * 2 * sizeof(taichi::float32));
 
