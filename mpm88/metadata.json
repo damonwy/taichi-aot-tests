@@ -1,144 +1,41 @@
 {
 "aot_data": {
-  "kernels": [{
-      "name": "init_c56_0_k0000_vk",
-      "is_jit_evaluator": false,
-      "tasks_attribs": [{
-          "name": "init_c56_0_k0000_vk_t00",
-          "advisory_total_num_threads": 8192,
-          "advisory_num_threads_per_group": 128,
-          "task_type": 1,
-          "buffer_binds": [{
-              "buffer": {
-                "type": 0,
-                "root_id": 0},
-              "binding": 0},{
-              "buffer": {
-                "type": 1,
-                "root_id": -1},
-              "binding": 1},{
-              "buffer": {
-                "type": 3,
-                "root_id": -1},
-              "binding": 2}],
-          "range_for_attribs": {
-            "has_value": true
-            "value": {
-              "begin": 0,
-              "end": 8192,
-              "const_begin": true,
-              "const_end": true}}}],
-      "ctx_attribs": {
-        "arg_attribs_vec_": [],
-        "ret_attribs_vec_": [],
-        "args_bytes_": 0,
-        "rets_bytes_": 0,
-        "extra_args_bytes_": 512}},{
-      "name": "substep_c54_0_k0004_vk",
-      "is_jit_evaluator": false,
-      "tasks_attribs": [{
-          "name": "substep_c54_0_k0004_vk_t00",
-          "advisory_total_num_threads": 16384,
-          "advisory_num_threads_per_group": 128,
-          "task_type": 1,
-          "buffer_binds": [{
-              "buffer": {
-                "type": 0,
-                "root_id": 0},
-              "binding": 0},{
-              "buffer": {
-                "type": 1,
-                "root_id": -1},
-              "binding": 1},{
-              "buffer": {
-                "type": 3,
-                "root_id": -1},
-              "binding": 2}],
-          "range_for_attribs": {
-            "has_value": true
-            "value": {
-              "begin": 0,
-              "end": 16384,
-              "const_begin": true,
-              "const_end": true}}},{
-          "name": "substep_c54_0_k0004_vk_t01",
-          "advisory_total_num_threads": 8192,
-          "advisory_num_threads_per_group": 128,
-          "task_type": 1,
-          "buffer_binds": [{
-              "buffer": {
-                "type": 0,
-                "root_id": 0},
-              "binding": 0},{
-              "buffer": {
-                "type": 1,
-                "root_id": -1},
-              "binding": 1},{
-              "buffer": {
-                "type": 3,
-                "root_id": -1},
-              "binding": 2}],
-          "range_for_attribs": {
-            "has_value": true
-            "value": {
-              "begin": 0,
-              "end": 8192,
-              "const_begin": true,
-              "const_end": true}}},{
-          "name": "substep_c54_0_k0004_vk_t02",
-          "advisory_total_num_threads": 16384,
-          "advisory_num_threads_per_group": 128,
-          "task_type": 1,
-          "buffer_binds": [{
-              "buffer": {
-                "type": 0,
-                "root_id": 0},
-              "binding": 0},{
-              "buffer": {
-                "type": 1,
-                "root_id": -1},
-              "binding": 1},{
-              "buffer": {
-                "type": 3,
-                "root_id": -1},
-              "binding": 2}],
-          "range_for_attribs": {
-            "has_value": true
-            "value": {
-              "begin": 0,
-              "end": 16384,
-              "const_begin": true,
-              "const_end": true}}},{
-          "name": "substep_c54_0_k0004_vk_t03",
-          "advisory_total_num_threads": 8192,
-          "advisory_num_threads_per_group": 128,
-          "task_type": 1,
-          "buffer_binds": [{
-              "buffer": {
-                "type": 0,
-                "root_id": 0},
-              "binding": 0},{
-              "buffer": {
-                "type": 1,
-                "root_id": -1},
-              "binding": 1},{
-              "buffer": {
-                "type": 3,
-                "root_id": -1},
-              "binding": 2}],
-          "range_for_attribs": {
-            "has_value": true
-            "value": {
-              "begin": 0,
-              "end": 8192,
-              "const_begin": true,
-              "const_end": true}}}],
-      "ctx_attribs": {
-        "arg_attribs_vec_": [],
-        "ret_attribs_vec_": [],
-        "args_bytes_": 0,
-        "rets_bytes_": 0,
-        "extra_args_bytes_": 512}}],
+  "kernels": {"substep": {
+      "tasks": [{
+          "type": "range_for",
+          "name": "substep_c56_0_k0004_vk_t00",
+          "source_path": "mpm88/substep_c56_0_k0004_vk_t00.spv",
+          "gpu_block_size": 128},{
+          "type": "range_for",
+          "name": "substep_c56_0_k0004_vk_t01",
+          "source_path": "mpm88/substep_c56_0_k0004_vk_t01.spv",
+          "gpu_block_size": 128},{
+          "type": "range_for",
+          "name": "substep_c56_0_k0004_vk_t02",
+          "source_path": "mpm88/substep_c56_0_k0004_vk_t02.spv",
+          "gpu_block_size": 128},{
+          "type": "range_for",
+          "name": "substep_c56_0_k0004_vk_t03",
+          "source_path": "mpm88/substep_c56_0_k0004_vk_t03.spv",
+          "gpu_block_size": 128}],
+      "args_count": 0,
+      "rets_count": 0,
+      "args_buffer_size": 0,
+      "rets_buffer_size": 0,
+      "scalar_args": {},
+      "arr_args": {}},"init": {
+      "tasks": [{
+          "type": "range_for",
+          "name": "init_c58_0_k0000_vk_t00",
+          "source_path": "mpm88/init_c58_0_k0000_vk_t00.spv",
+          "gpu_block_size": 128}],
+      "args_count": 0,
+      "rets_count": 0,
+      "args_buffer_size": 0,
+      "rets_buffer_size": 0,
+      "scalar_args": {},
+      "arr_args": {}}},
+  "kernel_tmpls": {},
   "fields": [{
       "field_name": "x",
       "dtype": 9,
@@ -146,46 +43,40 @@
       "mem_offset_in_parent": 0,
       "shape": [8192],
       "is_scalar": false,
-      "row_num": 1,
-      "column_num": 2},{
+      "element_shape": [1,2]},{
       "field_name": "v",
       "dtype": 9,
       "dtype_name": "f32",
       "mem_offset_in_parent": 65536,
       "shape": [8192],
       "is_scalar": false,
-      "row_num": 1,
-      "column_num": 2},{
+      "element_shape": [1,2]},{
       "field_name": "C",
       "dtype": 9,
       "dtype_name": "f32",
       "mem_offset_in_parent": 131072,
       "shape": [8192],
       "is_scalar": false,
-      "row_num": 2,
-      "column_num": 2},{
+      "element_shape": [2,2]},{
       "field_name": "J",
       "dtype": 9,
       "dtype_name": "f32",
       "mem_offset_in_parent": 262144,
       "shape": [8192],
       "is_scalar": true,
-      "row_num": 1,
-      "column_num": 1},{
+      "element_shape": []},{
       "field_name": "grid_v",
       "dtype": 9,
       "dtype_name": "f32",
       "mem_offset_in_parent": 294912,
       "shape": [128,128],
       "is_scalar": false,
-      "row_num": 1,
-      "column_num": 2},{
+      "element_shape": [1,2]},{
       "field_name": "grid_m",
       "dtype": 9,
       "dtype_name": "f32",
       "mem_offset_in_parent": 425984,
       "shape": [128,128],
       "is_scalar": true,
-      "row_num": 1,
-      "column_num": 1}],
+      "element_shape": []}],
   "root_buffer_size": 491520}}
