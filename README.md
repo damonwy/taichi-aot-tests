@@ -19,6 +19,7 @@ TAICHI_CMAKE_ARGS="-DTI_WITH_VULKAN:BOOL=ON -DTI_WITH_CUDA:BOOL=OFF -DTI_WITH_OP
 ```
 
 ## Android Build
+If you are building Taichi with custom changes, make sure to override the prebuilt binaries in: `app/src/main/jniLibs/arm64-v8a/`
 ```
 export TAICHI_REPO_DIR=/path/github/taichi/
 cd android
