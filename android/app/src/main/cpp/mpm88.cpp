@@ -52,6 +52,8 @@ taichi::lang::vulkan::VkRuntime::KernelHandle substep_kernel_handle;
 taichi::ui::vulkan::Renderer *renderer;
 taichi::ui::vulkan::Gui *gui;
 taichi::lang::DeviceAllocation dalloc_circles;
+taichi::ui::CirclesInfo circles;
+taichi::lang::RuntimeContext host_ctx;
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
@@ -63,13 +65,13 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
 
   // Initialize our Vulkan Program pipeline
   taichi::uint64 *result_buffer{nullptr};
-  taichi::lang::RuntimeContext host_ctx;
 
   // Create a memory pool to allocate GPU memory
   memory_pool = std::make_unique<taichi::lang::MemoryPool>(
       taichi::Arch::vulkan, nullptr);
   result_buffer = (taichi::uint64 *)memory_pool->allocate(
       sizeof(taichi::uint64) * taichi_result_buffer_entries, 8);
+  ALOGI("Created a memory pool");
 
   // Create a GGUI configuration
   taichi::ui::AppConfig app_config;
@@ -79,14 +81,15 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   app_config.vsync = true;
   app_config.show_window = false;
   app_config.package_path = "/data/local/tmp/";  // Use CacheDir()
-  app_config.ti_arch = taichi::lang::Arch::vulkan;
+  app_config.ti_arch = taichi::Arch::vulkan;
   renderer = new taichi::ui::vulkan::Renderer();
-  renderer->init(native_window, app_config);
+  renderer->init(nullptr, native_window, app_config);
 
   // Create a GUI even though it's not used in our case (required to
   // render the renderer)
   gui = new taichi::ui::vulkan::Gui(&renderer->app_context(),
                                     &renderer->swap_chain(), native_window);
+  ALOGI("Created a gui");
 
   // Create the Vk Runtime
   taichi::lang::vulkan::VkRuntime::Params params;
@@ -115,12 +118,14 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   init_kernel_handle = vulkan_runtime->register_taichi_kernel(init_kernel);
   substep_kernel_handle =
       vulkan_runtime->register_taichi_kernel(substep_kernel);
+  ALOGI("Register kernels");
 
   // Allocate memory for Circles position
   taichi::lang::Device::AllocParams alloc_params;
   alloc_params.size = NR_PARTICLES * sizeof(taichi::ui::Vertex);
   dalloc_circles =
     vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
+  ALOGI("Allocate memory");
 
   // Describe information to render the circle with Vulkan
   taichi::ui::FieldInfo f_info;
@@ -144,8 +149,12 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   host_ctx.set_device_allocation(0, true);
   host_ctx.extra_args[0][0] = 1;
   host_ctx.extra_args[0][1] = 12;
+  host_ctx.extra_args[0][2] = 1;
+
+
   vulkan_runtime->launch_kernel(init_kernel_handle, &host_ctx);
   vulkan_runtime->synchronize();
+  ALOGI("launch kernel init");
 
   // Clear the background
   renderer->set_background_color({0.6, 0.6, 0.6});
@@ -194,15 +203,17 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
                                                           jclass,
                                                           jobject surface) {
-  taichi::lang::RuntimeContext host_ctx;
+  // taichi::lang::RuntimeContext host_ctx;
 
   // timer starts before launch kernel
   auto start = std::chrono  ::steady_clock::now();
+  ALOGI("before launch kernel substep");
 
   // Run 'substep' 50 times
   for (int i = 0; i < 50; i++) {
     vulkan_runtime->launch_kernel(substep_kernel_handle, &host_ctx);
   }
+  ALOGI("launch kernel substep");
 
   // Make sure to sync the GPU memory so we can read the latest update from CPU
   // And read the 'x' calculated on GPU to our local variable
@@ -217,7 +228,7 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
 
   // Render the UI
   renderer->circles(circles);
-  renderer->draw_frame(gui.get());
+  renderer->draw_frame(gui);
   renderer->swap_chain().surface().present_image();
   renderer->prepare_for_next_frame();
 }

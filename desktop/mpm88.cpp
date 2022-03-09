@@ -101,7 +101,7 @@ int main() {
     host_ctx.set_device_allocation(0, true);
     host_ctx.extra_args[0][0] = 1;
     host_ctx.extra_args[0][1] = 12;
-    host_ctx.extra_args[0][2] = 1;
+    // host_ctx.extra_args[0][2] = 1;
 
     // Create a GUI even though it's not used in our case (required to
     // render the renderer)
