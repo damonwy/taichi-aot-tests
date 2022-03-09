@@ -67,7 +67,7 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
 
   // Create a memory pool to allocate GPU memory
   memory_pool = std::make_unique<taichi::lang::MemoryPool>(
-      taichi::lang::Arch::vulkan, nullptr);
+      taichi::Arch::vulkan, nullptr);
   result_buffer = (taichi::uint64 *)memory_pool->allocate(
       sizeof(taichi::uint64) * taichi_result_buffer_entries, 8);
 
@@ -119,15 +119,36 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   // Allocate memory for Circles position
   taichi::lang::Device::AllocParams alloc_params;
   alloc_params.size = NR_PARTICLES * sizeof(taichi::ui::Vertex);
-  alloc_params.host_write = true;
-  alloc_params.host_read = true;
   dalloc_circles =
-      renderer->app_context().device().allocate_memory(alloc_params);
+    vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
 
-  //
-  // Run MPM88 from AOT module similar to Python code
-  //
+  // Describe information to render the circle with Vulkan
+  taichi::ui::FieldInfo f_info;
+  f_info.valid        = true;
+  f_info.field_type   = taichi::ui::FieldType::Scalar;
+  f_info.matrix_rows  = 1;
+  f_info.matrix_cols  = 1;
+  f_info.shape        = {NR_PARTICLES};
+  f_info.field_source = taichi::ui::FieldSource::TaichiVulkan;
+  f_info.dtype        = taichi::lang::PrimitiveType::f32;
+  f_info.snode        = nullptr;
+  f_info.dev_alloc    = dalloc_circles;
+
+  circles.renderable_info.has_per_vertex_color = false;
+  circles.renderable_info.vbo                  = f_info;
+  circles.color                                = {0.8, 0.4, 0.1};
+  circles.radius                               = 0.0015f;
+
+
+  host_ctx.set_arg(0, &dalloc_circles);
+  host_ctx.set_device_allocation(0, true);
+  host_ctx.extra_args[0][0] = 1;
+  host_ctx.extra_args[0][1] = 12;
   vulkan_runtime->launch_kernel(init_kernel_handle, &host_ctx);
+  vulkan_runtime->synchronize();
+
+  // Clear the background
+  renderer->set_background_color({0.6, 0.6, 0.6});
 
 #if 0
   // Sanity check to make sure the shaders are running properly, we should have
@@ -174,10 +195,6 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
                                                           jclass,
                                                           jobject surface) {
   taichi::lang::RuntimeContext host_ctx;
-  float x[NR_PARTICLES * 2];
-
-  // Clear the background
-  renderer->set_background_color({0.6, 0.6, 0.6});
 
   // timer starts before launch kernel
   auto start = std::chrono  ::steady_clock::now();
@@ -198,40 +215,9 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   auto cpu_time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
   ALOGI("Execution time is %" PRId64 "ns\n", cpu_time);
 
-  vulkan_runtime->read_memory((uint8_t *)x, 0,
-                              NR_PARTICLES * 2 * sizeof(taichi::float32));
-
-  // Copy the results from the kernel to our DeviceAlloc so it can be used to
-  // render circle
-  taichi::ui::Vertex *vs_buffer =
-      (taichi::ui::Vertex *)renderer->app_context().device().map(
-          dalloc_circles);
-  for (int i = 0, j = 0; i < NR_PARTICLES; i++, j += 2) {
-    vs_buffer[i].pos = {x[j], x[j + 1], 0.0};
-  }
-  renderer->app_context().device().unmap(dalloc_circles);
-
-  // Describe information to render the circle with Vulkan
-  taichi::ui::FieldInfo f_info;
-  f_info.valid = true;
-  f_info.field_type = taichi::ui::FieldType::Scalar;
-  f_info.matrix_rows = 1;
-  f_info.matrix_cols = 1;
-  f_info.shape = {NR_PARTICLES};
-  f_info.field_source = taichi::ui::FieldSource::TaichiVulkan;
-  f_info.dtype = taichi::lang::PrimitiveType::f32;
-  f_info.snode = nullptr;
-  f_info.dev_alloc = dalloc_circles;
-
-  taichi::ui::CirclesInfo circles;
-  circles.renderable_info.has_per_vertex_color = false;
-  circles.renderable_info.vbo = f_info;
-  circles.color = {0.6, 0, 1};
-  circles.radius = 0.0015f;
-
   // Render the UI
   renderer->circles(circles);
-  renderer->draw_frame(gui);
+  renderer->draw_frame(gui.get());
   renderer->swap_chain().surface().present_image();
   renderer->prepare_for_next_frame();
 }
