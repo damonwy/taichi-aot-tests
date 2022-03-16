@@ -41,14 +41,22 @@ def compute_indices_shape():
 
 
 # Taichi fields
+# x = ti.Vector.field(args.dim, dtype=ti.f32, shape=n_verts)
+x = ti.Vector.ndarray(args.dim, dtype=ti.f32, shape=n_verts)
 ox = ti.Vector.field(args.dim, dtype=ti.f32, shape=n_verts)
+v = ti.Vector.field(args.dim, dtype=ti.f32, shape=n_verts)
 f = ti.Vector.field(args.dim, dtype=ti.f32, shape=n_verts)
+mul_ans = ti.Vector.field(args.dim, dtype=ti.f32, shape=n_verts)
 m = ti.field(dtype=ti.f32, shape=n_verts)
 
 vertices = ti.Vector.field(4, dtype=ti.i32, shape=n_cells)
 
 B = ti.Matrix.field(args.dim, args.dim, dtype=ti.f32, shape=n_cells)
 W = ti.field(dtype=ti.f32, shape=n_cells)
+
+b = ti.Vector.field(3, dtype=ti.f32, shape=n_verts)
+r0 = ti.Vector.field(3, dtype=ti.f32, shape=n_verts)
+p0 = ti.Vector.field(3, dtype=ti.f32, shape=n_verts)
 
 indices = ti.field(ti.i32, shape=compute_indices_shape())
 
@@ -80,7 +88,7 @@ def get_vertices():
 
 
 @ti.func
-def Ds(verts, x: ti.template()):
+def Ds(verts, x:ti.template()):
     return ti.Matrix.cols([x[verts[i]] - x[verts[3]] for i in range(3)])
 
 
@@ -120,7 +128,7 @@ def get_force(x: ti.any_arr()):
 
 
 @ti.kernel
-def matmul_cell(ret: ti.any_arr(), vel: ti.any_arr()):
+def matmul_cell(ret: ti.template(), vel: ti.template()):
     for i in ret:
         ret[i] = vel[i] * m[i]
     for c in vertices:
@@ -145,17 +153,18 @@ def matmul_cell(ret: ti.any_arr(), vel: ti.any_arr()):
 
 
 @ti.kernel
-def add1(ans: ti.any_arr(), a: ti.any_arr(), k: ti.f32, b: ti.any_arr()):
+def add(ans: ti.template(), a: ti.template(), k: ti.f32, b: ti.template()):
     for i in ans:
         ans[i] = a[i] + k * b[i]
 
 @ti.kernel
-def add_ndarray(ans: ti.any_arr(), v: ti.any_arr(), k: ti.f32):
+def add1(ans: ti.any_arr(),  k: ti.f32, b: ti.template()):
     for i in ans:
-        ans[i] += k * v[i]
+        ans[i] += k * b[i]
+
 
 @ti.kernel
-def dot(a: ti.any_arr(), b: ti.any_arr()) -> ti.f32:
+def dot(a: ti.template(), b: ti.template()) -> ti.f32:
     ans = 0.0
     for i in a:
         ans += a[i].dot(b[i])
@@ -163,44 +172,43 @@ def dot(a: ti.any_arr(), b: ti.any_arr()) -> ti.f32:
 
 
 @ti.kernel
-def get_b(b: ti.any_arr(), v: ti.any_arr()):
+def get_b():
     for i in b:
         b[i] = m[i] * v[i] + dt * f[i]
 
 
-def cg(x, b, v, r0, p0, mul_ans):
+def cg():
 
     def mul(x):
         matmul_cell(mul_ans, x)
         return mul_ans
 
     get_force(x)
-    get_b(b, v)
-    add1(r0, b, -1, mul(v))
+    get_b()
+    add(r0, b, -1, mul(v))
 
-    p0.copy_from(r0)
+    d = p0
+    d.copy_from(r0)
     r_2 = dot(r0, r0)
     n_iter = 8
     epsilon = 1e-6
     r_2_init = r_2
     r_2_new = r_2
-    for it in range(n_iter):
-        q = mul(p0)
-        alpha = r_2_new / dot(p0, q)
-        print(f'  CG iter={it} alpha={alpha}')
-        add_ndarray(v, p0, alpha)
-        add_ndarray(r0, q, -alpha)
+    for _ in range(n_iter):
+        q = mul(d)
+        alpha = r_2_new / dot(d, q)
+        add(v, v, alpha, d)
+        add(r0, r0, -alpha, q)
         r_2 = r_2_new
         r_2_new = dot(r0, r0)
         if r_2_new <= r_2_init * epsilon**2: break
         beta = r_2_new / r_2
-        add1(p0, r0, beta, p0)
+        add(d, r0, beta, d)
     f.fill(0)
-    add_ndarray(x, v, dt)
+    add1(x, dt, v)
 
 
 def cg_cgraphed():
-
     def make_mul_fn():
         param_x = cgr.Var('x')
         lit_mul_ans = cgr.Literal(mul_ans)
@@ -287,15 +295,16 @@ def cg_cgraphed():
 
 
 @ti.kernel
-def advect(x: ti.any_arr(), v: ti.any_arr()):
+def advect(x: ti.any_arr()):
     for p in x:
         v[p] += dt * (f[p] / m[p])
+        # x[p] -= dt * 0.05
         x[p] += dt * v[p]
         f[p] = ti.Vector([0, 0, 0])
 
 
 @ti.kernel
-def init(x: ti.any_arr(), v: ti.any_arr()):
+def init(x: ti.any_arr()):
     for u in x:
         x[u] = ox[u]
         v[u] = [0.0] * 3
@@ -312,7 +321,7 @@ def init(x: ti.any_arr(), v: ti.any_arr()):
 
 
 @ti.kernel
-def floor_bound(x: ti.any_arr(), v: ti.any_arr()):
+def floor_bound(x: ti.any_arr()):
     for u in x:
         if x[u].y < 0:
             x[u].y = 0
@@ -354,33 +363,30 @@ def get_indices(x: ti.any_arr()):
                     indices[m * 3 + 1] = verts[1]
                     indices[m * 3 + 2] = verts[2]
 
-
 _printed_ast = False
-
-
-def substep(x, b, v, r0, p0, mul_ans):
+def substep():
     global _printed_ast
     if args.exp == 'explicit':
         for _ in range(40):
             get_force(x)
-            advect(x, v)
+            advect(x)
             # print(f'after one substep:\n{x.to_numpy()}\n')
     else:
-        cg(x, b, v, r0, p0, mul_ans)
+        cg()
         # bb = cg_cgraphed()
         # if not _printed_ast:
-        #     vis = cgr.Printer()
-        #     vis.visit(bb)
-        #     print(vis.dump())
-        #     _printed_ast = True
-    floor_bound(x, v)
+        #   vis = cgr.Printer()
+        #   vis.visit(bb)
+        #   print(vis.dump())
+        #   _printed_ast = True
+    floor_bound(x)
 
 
-def run_sim(x, b, r0, p0, v, mul_ans):
+def run_sim():
     get_vertices()
-    init(x, v)
+    init(x)
     get_indices(x)
-    print(f'init:\n{x.to_numpy()}\n')
+    print(f'init:{x.shape}\n{x.to_numpy()}\n')
 
     def T(a):
 
@@ -397,11 +403,11 @@ def run_sim(x, b, r0, p0, v, mul_ans):
     gui = ti.GUI('Implicit FEM')
     frame = 0
     while gui.running:
-        substep(x, b, v, r0, p0, mul_ans)
+        substep()
         if gui.get_event(ti.GUI.PRESS):
             if gui.event.key in [ti.GUI.ESCAPE, ti.GUI.EXIT]: break
         if gui.is_pressed('r'):
-            init(x, v)
+            init(x)
         gui.clear(0x000000)
         xnp = x.to_numpy()
         xpos = T(xnp / 3)
@@ -414,72 +420,42 @@ def run_sim(x, b, r0, p0, v, mul_ans):
         frame += 1
 
 
-def run_aot_shared(m, x, v):
-    m.add_kernel(get_vertices)
-    m.add_kernel(init, (x, v))
-    m.add_kernel(get_indices, (x, ))
-    m.add_kernel(floor_bound, (x, v))
-
-
 def run_aot_explicit(m):
-    m.add_kernel(get_force, (x, ))
-    m.add_kernel(advect, (x, v))
+    m.add_kernel(get_force, (x,))
+    m.add_kernel(advect, (x,))
 
+def run_aot_shared(m):
+    m.add_kernel(get_vertices)
+    m.add_kernel(init, (x,))
+    m.add_kernel(get_indices, (x, ))
+    m.add_kernel(floor_bound, (x,))
 
 def run_aot_implicit(m):
-    d = p0
-    q = mul_ans
-    m.add_field('mul_ans', mul_ans)
-    m.add_field('v', v)
-    m.add_field('p0', p0)
-    m.add_field('r0', r0)
-    m.add_field('f', f)
-    m.add_field('b', b)
-
-    m.add_kernel(get_force)
-    m.add_kernel(get_b)
     with m.add_kernel_template(matmul_cell) as kt:
-        kt.instantiate(ret=mul_ans, vel=v)
-        kt.instantiate(ret=mul_ans, vel=d)
-    with m.add_kernel_template(dot) as kt:
-        kt.instantiate(a=r0, b=r0)
-        kt.instantiate(a=d, b=q)
-    # add(ans: ti.template(), a: ti.template(), k: ti.f32, b: ti.template())
-    with m.add_kernel_template(add) as kt:
-        kt.instantiate(ans=r0, a=b, b=mul_ans)
-        kt.instantiate(ans=v, a=v, b=d)
-        kt.instantiate(ans=r0, a=r0, b=q)
-        kt.instantiate(ans=d, a=r0, b=d)
-        kt.instantiate(ans=x, a=x, b=v)
+        kt.instantiate(ret=mul_ans, vel=x)
+        kt.instantiate(ret=mul_ans, vel=x)
 
 
-def run_aot(x, b, r0, p0, v, mul_ans):
+def run_aot():
     dir_name = args.exp + '_fem'
     shutil.rmtree(dir_name, ignore_errors=True)
     pathlib.Path(dir_name).mkdir(parents=True, exist_ok=False)
 
     m = ti.aot.Module(ti.metal)
-
-    run_aot_shared(m, x, v)
+    run_aot_shared(m)
     if args.exp == 'explicit':
         run_aot_explicit(m)
     else:
         run_aot_implicit(m)
+
+    # m.add_field('x', x)
 
     m.save(dir_name, 'fem')
     print('AOT done')
 
 
 if __name__ == '__main__':
-    x = ti.Vector.ndarray(args.dim, dtype=ti.f32, shape=n_verts)
-    v = ti.Vector.ndarray(args.dim, dtype=ti.f32, shape=n_verts)
-    mul_ans = ti.Vector.ndarray(args.dim, dtype=ti.f32, shape=n_verts)
-
-    b = ti.Vector.ndarray(3, dtype=ti.f32, shape=n_verts)
-    r0 = ti.Vector.ndarray(3, dtype=ti.f32, shape=n_verts)
-    p0 = ti.Vector.ndarray(3, dtype=ti.f32, shape=n_verts)
-
     if args.aot:
-        run_aot(x, b, r0, p0, v, mul_ans)
+        run_aot()
     else:
-        run_sim(x, b, r0, p0, v, mul_ans)
+        run_sim()

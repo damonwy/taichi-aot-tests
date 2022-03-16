@@ -88,15 +88,25 @@ int main() {
     // Prepare Ndarray for model
     taichi::lang::Device::AllocParams alloc_params;
     alloc_params.size = NR_PARTICLES * 3 * sizeof(float);
-    taichi::lang::DeviceAllocation devalloc_pos = vulkan_runtime.get_ti_device()->allocate_memory(alloc_params);
+    // x
+    taichi::lang::DeviceAllocation devalloc_x = vulkan_runtime.get_ti_device()->allocate_memory(alloc_params);
+    // v
+    taichi::lang::DeviceAllocation devalloc_v = vulkan_runtime.get_ti_device()->allocate_memory(alloc_params);
 
     taichi::lang::RuntimeContext host_ctx;
     memset(&host_ctx, 0, sizeof(taichi::lang::RuntimeContext));
-    host_ctx.set_arg(0, &devalloc_pos);
+    // x
+    host_ctx.set_arg(0, &devalloc_x);
     host_ctx.set_device_allocation(0, true);
     host_ctx.extra_args[0][0] = 512;
     host_ctx.extra_args[0][1] = 3;
     host_ctx.extra_args[0][2] = 1;
+    // v
+    host_ctx.set_arg(1, &devalloc_v);
+    host_ctx.set_device_allocation(1, true);
+    host_ctx.extra_args[1][0] = 512;
+    host_ctx.extra_args[1][1] = 3;
+    host_ctx.extra_args[1][2] = 1;
 
     // Create a GUI even though it's not used in our case (required to
     // render the renderer)
@@ -117,7 +127,7 @@ int main() {
     f_info.field_source = taichi::ui::FieldSource::TaichiVulkan;
     f_info.dtype        = taichi::lang::PrimitiveType::f32;
     f_info.snode        = nullptr;
-    f_info.dev_alloc    = devalloc_pos;
+    f_info.dev_alloc    = devalloc_x;
     taichi::ui::CirclesInfo circles;
     circles.renderable_info.has_per_vertex_color = false;
     circles.renderable_info.vbo                  = f_info;
