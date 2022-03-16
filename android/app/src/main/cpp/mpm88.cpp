@@ -47,8 +47,8 @@ std::vector<std::string> get_required_device_extensions() {
 
 std::unique_ptr<taichi::lang::MemoryPool> memory_pool;
 std::unique_ptr<taichi::lang::vulkan::VkRuntime> vulkan_runtime;
-taichi::lang::vulkan::VkRuntime::KernelHandle init_kernel_handle;
-taichi::lang::vulkan::VkRuntime::KernelHandle substep_kernel_handle;
+std::unique_ptr<taichi::lang::aot::Kernel> init_kernel;
+std::unique_ptr<taichi::lang::aot::Kernel> substep_kernel;
 taichi::ui::vulkan::Renderer *renderer;
 taichi::ui::vulkan::Gui *gui;
 taichi::lang::DeviceAllocation dalloc_circles;
@@ -61,7 +61,6 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
                                                         jobject assets,
                                                         jobject surface) {
   ANativeWindow *native_window = ANativeWindow_fromSurface(env, surface);
-  taichi::lang::vulkan::AotModuleLoaderImpl aot_loader("/data/local/tmp/mpm88");
 
   // Initialize our Vulkan Program pipeline
   taichi::uint64 *result_buffer{nullptr};
@@ -98,26 +97,18 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   vulkan_runtime =
       std::make_unique<taichi::lang::vulkan::VkRuntime>(std::move(params));
 
+taichi::lang::vulkan::AotModuleParams aot_params{"/data/local/tmp/mpm88", vulkan_runtime.get()};
+auto module = taichi::lang::vulkan::make_aot_module(aot_params);
   // Retrieve kernels/fields/etc from AOT module so we can initialize our
   // runtime
-  taichi::lang::vulkan::VkRuntime::RegisterParams init_kernel, substep_kernel;
-  bool ret = aot_loader.get_kernel("init", init_kernel);
-  if (!ret) {
-    ALOGE("Cannot find 'init' kernel\n");
-    return;
-  }
-  ret = aot_loader.get_kernel("substep", substep_kernel);
-  if (!ret) {
-    ALOGE("Cannot find 'substep' kernel\n");
-    return;
-  }
-  auto root_size = aot_loader.get_root_size();
-  ALOGI("root buffer size=%d\n", root_size);
+  auto root_size = module->get_root_size();
+    ALOGI("root buffer size=%d\n", root_size);
 
-  vulkan_runtime->add_root_buffer(root_size);
-  init_kernel_handle = vulkan_runtime->register_taichi_kernel(init_kernel);
-  substep_kernel_handle =
-      vulkan_runtime->register_taichi_kernel(substep_kernel);
+    vulkan_runtime->add_root_buffer(root_size);
+  init_kernel = module->get_kernel("init");
+  substep_kernel = module->get_kernel("substep");
+
+
   ALOGI("Register kernels");
 
   // Allocate memory for Circles position
@@ -152,7 +143,8 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   host_ctx.extra_args[0][2] = 1;
 
 
-  vulkan_runtime->launch_kernel(init_kernel_handle, &host_ctx);
+  //vulkan_runtime->launch_kernel(init_kernel_handle, &host_ctx);
+  init_kernel->launch(&host_ctx);
   vulkan_runtime->synchronize();
   ALOGI("launch kernel init");
 
@@ -211,7 +203,8 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
 
   // Run 'substep' 50 times
   for (int i = 0; i < 50; i++) {
-    vulkan_runtime->launch_kernel(substep_kernel_handle, &host_ctx);
+    //vulkan_runtime->launch_kernel(substep_kernel_handle, &host_ctx);
+    substep_kernel->launch(&host_ctx);
   }
   ALOGI("launch kernel substep");
 

@@ -58,7 +58,7 @@ int main() {
     app_config.ti_arch      = taichi::Arch::vulkan;
 
     // // Create GUI & renderer
-    auto renderer  = std::make_unique<taichi::ui::vulkan::Renderer>();   
+    auto renderer  = std::make_unique<taichi::ui::vulkan::Renderer>();
     renderer->init(nullptr, window, app_config);
 
     // Initialize our Vulkan Program pipeline
@@ -72,29 +72,20 @@ int main() {
 
     // Retrieve kernels/fields/etc from AOT module so we can initialize our
     // runtime
-    taichi::lang::vulkan::AotModuleLoaderImpl aot_loader("../mpm88/");
-    taichi::lang::vulkan::VkRuntime::RegisterParams init_kernel, substep_kernel;
-    bool ret = aot_loader.get_kernel("init", init_kernel);
-    if (!ret) {
-        printf("Cannot find 'init' kernel\n");
-        return -1;
-    }
-    ret = aot_loader.get_kernel("substep", substep_kernel);
-    if (!ret) {
-        printf("Cannot find 'substep' kernel\n");
-        return -1;
-    }
-    auto root_size = aot_loader.get_root_size();
+    taichi::lang::vulkan::AotModuleParams aot_params{"../mpm88/", &vulkan_runtime};
+    auto module = taichi::lang::vulkan::make_aot_module(aot_params);
+    auto root_size = module->get_root_size();
     printf("root buffer size=%ld\n", root_size);
     vulkan_runtime.add_root_buffer(root_size);
-    auto init_kernel_handle = vulkan_runtime.register_taichi_kernel(init_kernel);
-    auto substep_kernel_handle = vulkan_runtime.register_taichi_kernel(substep_kernel);
+
+    auto init_kernel = module->get_kernel("init");
+    auto substep_kernel = module->get_kernel("substep");
 
     // Prepare Ndarray for model
     taichi::lang::Device::AllocParams alloc_params;
     alloc_params.size = NR_PARTICLES * 2 * sizeof(float);
     taichi::lang::DeviceAllocation devalloc_pos = vulkan_runtime.get_ti_device()->allocate_memory(alloc_params);
-    
+
     taichi::lang::RuntimeContext host_ctx;
     memset(&host_ctx, 0, sizeof(taichi::lang::RuntimeContext));
     host_ctx.set_arg(0, &devalloc_pos);
@@ -107,7 +98,7 @@ int main() {
     // render the renderer)
     auto gui = std::make_shared<taichi::ui::vulkan::Gui>(&renderer->app_context(), &renderer->swap_chain(), window);
 
-    vulkan_runtime.launch_kernel(init_kernel_handle, &host_ctx);
+    init_kernel->launch(&host_ctx);
     vulkan_runtime.synchronize();
 
     // Describe information to render the circle with Vulkan
@@ -126,13 +117,13 @@ int main() {
     circles.renderable_info.vbo                  = f_info;
     circles.color                                = {0.8, 0.4, 0.1};
     circles.radius                               = 0.005f; // 0.0015f looks unclear on desktop
-    
+
     renderer->set_background_color({0.6, 0.6, 0.6});
 
     while (!glfwWindowShouldClose(window)) {
         // Run 'substep' 50 times
         for (int i = 0; i < 50; i++) {
-            vulkan_runtime.launch_kernel(substep_kernel_handle, &host_ctx);
+            substep_kernel->launch(&host_ctx);
         }
         vulkan_runtime.synchronize();
 

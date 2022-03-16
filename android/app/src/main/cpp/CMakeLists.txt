@@ -8,7 +8,8 @@ set(TAICHI_REPO_DIR $ENV{TAICHI_REPO_DIR})
 
 # build main native library
 link_directories(${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/)
-add_library(taichi-test-native SHARED stable_fluids.cpp)
+#add_library(taichi-test-native SHARED stable_fluids.cpp)
+add_library(taichi-test-native SHARED mpm88.cpp)
 target_compile_options(taichi-test-native PUBLIC -Wall -Wextra -std=c++17 -DTI_WITH_VULKAN -DTI_INCLUDED)
 
 target_include_directories(taichi-test-native PUBLIC ${TAICHI_REPO_DIR}/)
