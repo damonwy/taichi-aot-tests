@@ -1,15 +1,16 @@
 cmake_minimum_required(VERSION 3.8)
 
-if (NOT DEFINED ENV{TAICHI_REPO_DIR})
-    message(FATAL_ERROR "TAICHI_REPO_DIR not set")
-endif()
+#if (NOT DEFINED ENV{TAICHI_REPO_DIR})
+#    message(FATAL_ERROR "TAICHI_REPO_DIR not set")
+#endif()
 
-set(TAICHI_REPO_DIR $ENV{TAICHI_REPO_DIR})
+set(TAICHI_REPO_DIR "~/github/taichi")
 
 # build main native library
 link_directories(${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/)
 #add_library(taichi-test-native SHARED stable_fluids.cpp)
-add_library(taichi-test-native SHARED mpm88.cpp)
+#add_library(taichi-test-native SHARED mpm88.cpp)
+add_library(taichi-test-native SHARED explicit_fem.cpp)
 target_compile_options(taichi-test-native PUBLIC -Wall -Wextra -std=c++17 -DTI_WITH_VULKAN -DTI_INCLUDED)
 
 target_include_directories(taichi-test-native PUBLIC ${TAICHI_REPO_DIR}/)
