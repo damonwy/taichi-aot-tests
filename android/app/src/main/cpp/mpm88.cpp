@@ -97,8 +97,8 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   vulkan_runtime =
       std::make_unique<taichi::lang::vulkan::VkRuntime>(std::move(params));
 
-taichi::lang::vulkan::AotModuleParams aot_params{"/data/local/tmp/mpm88", vulkan_runtime.get()};
-auto module = taichi::lang::vulkan::make_aot_module(aot_params);
+  taichi::lang::vulkan::AotModuleParams aot_params{"/data/local/tmp/mpm88", vulkan_runtime.get()};
+  auto module = taichi::lang::aot::Module::load(taichi::Arch::vulkan, aot_params);
   // Retrieve kernels/fields/etc from AOT module so we can initialize our
   // runtime
   auto root_size = module->get_root_size();

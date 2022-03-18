@@ -72,8 +72,8 @@ int main() {
 
     // Retrieve kernels/fields/etc from AOT module so we can initialize our
     // runtime
-    taichi::lang::vulkan::AotModuleParams aot_params{"../mpm88/", &vulkan_runtime};
-    auto module = taichi::lang::vulkan::make_aot_module(aot_params);
+    taichi::lang::vulkan::AotModuleParams aot_params{"../mpm88", &vulkan_runtime};
+    auto module = taichi::lang::aot::Module::load(taichi::Arch::vulkan, aot_params);
     auto root_size = module->get_root_size();
     printf("root buffer size=%ld\n", root_size);
     vulkan_runtime.add_root_buffer(root_size);
