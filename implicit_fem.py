@@ -50,6 +50,7 @@ B = ti.Matrix.field(args.dim, args.dim, dtype=ti.f32, shape=n_cells)
 W = ti.field(dtype=ti.f32, shape=n_cells)
 
 indices = ti.field(ti.i32, shape=compute_indices_shape())
+# gravity = ti.Vector.field(3, dtype=ti.f32, shape=())
 
 
 @ti.func
@@ -116,6 +117,7 @@ def get_force(x: ti.any_arr(), f: ti.any_arr()):
         get_force_func(c, vertices[c], x, f)
     for u in f:
         f[u].y -= 9.8 * m[u]
+        # f[u] += gravity[None] * m[u]
 
 
 @ti.kernel
@@ -144,11 +146,12 @@ def matmul_cell(vel: ti.any_arr(), ret: ti.any_arr()):
 
 
 @ti.kernel
-def add1(ans: ti.any_arr(), a: ti.any_arr(), k: ti.f32, b: ti.any_arr()):
+def add(ans: ti.any_arr(), a: ti.any_arr(), k: ti.f32, b: ti.any_arr()):
     for i in ans:
         ans[i] = a[i] + k * b[i]
 
 
+'''
 @ti.kernel
 def add2(ans: ti.any_arr(), a: ti.any_arr(), k: ti.f32):
     for i in ans:
@@ -160,6 +163,8 @@ def add2(ans: ti.any_arr(), a: ti.any_arr(), k: ti.f32):
 def add_ndarray(ans: ti.any_arr(), v: ti.any_arr(), k: ti.f32):
     for i in ans:
         ans[i] += k * v[i]
+'''
+
 
 @ti.kernel
 def dot(a: ti.any_arr(), b: ti.any_arr()) -> ti.f32:
@@ -174,11 +179,13 @@ def get_b(v: ti.any_arr(), b: ti.any_arr(), f: ti.any_arr()):
     for i in b:
         b[i] = m[i] * v[i] + dt * f[i]
 
+
 # TODO: this is a built-in kernel.
 @ti.kernel
 def ndarray_to_ndarray(ndarray: ti.any_arr(), other: ti.any_arr()):
     for I in ti.grouped(ndarray):
         ndarray[I] = other[I]
+
 
 # TODO: this is a built-in kernel.
 @ti.kernel
@@ -192,7 +199,7 @@ def cg(x, b, v, r0, p0, mul_ans, f):
     get_force(x, f)
     get_b(v, b, f)
     matmul_cell(v, mul_ans)
-    add1(r0, b, -1, mul_ans)
+    add(r0, b, -1, mul_ans)
 
     # p0.copy_from(r0)
     ndarray_to_ndarray(p0, r0)
@@ -205,19 +212,19 @@ def cg(x, b, v, r0, p0, mul_ans, f):
         matmul_cell(p0, mul_ans)
         alpha = r_2_new / dot(p0, mul_ans)
         print(f'  CG iter={it} alpha={alpha}')
-        add_ndarray(v, p0, alpha)
-        add_ndarray(r0, mul_ans, -alpha)
+        add(v, v, alpha, p0)
+        add(r0, r0, -alpha, mul_ans)
         r_2 = r_2_new
         r_2_new = dot(r0, r0)
         if r_2_new <= r_2_init * epsilon**2: break
         beta = r_2_new / r_2
-        add2(p0, r0, beta)
+        add(p0, r0, beta, p0)
     fill_ndarray(f, 0)
-    add_ndarray(x, v, dt)
+    add(x, x, dt, v)
 
 
+'''
 def cg_cgraphed():
-
     def make_mul_fn():
         param_x = cgr.Var('x')
         lit_mul_ans = cgr.Literal(mul_ans)
@@ -301,6 +308,7 @@ def cg_cgraphed():
     vm.exec(bb)
 
     return bb
+'''
 
 
 @ti.kernel
@@ -381,15 +389,16 @@ def substep(x, b, v, r0, p0, mul_ans, f):
         for _ in range(40):
             get_force(x, f)
             advect(x, v, f)
-            # print(f'after one substep:\n{x.to_numpy()}\n')
     else:
         cg(x, b, v, r0, p0, mul_ans, f)
-        # bb = cg_cgraphed()
-        # if not _printed_ast:
-        #     vis = cgr.Printer()
-        #     vis.visit(bb)
-        #     print(vis.dump())
-        #     _printed_ast = True
+        '''
+        bb = cg_cgraphed()
+        if not _printed_ast:
+            vis = cgr.Printer()
+            vis.visit(bb)
+            print(vis.dump())
+            _printed_ast = True
+        '''
     floor_bound(x, v)
 
 
@@ -422,10 +431,6 @@ def run_sim(x, b, r0, p0, v, mul_ans, f):
         gui.clear(0x000000)
         xnp = x.to_numpy()
         xpos = T(xnp / 3)
-        # if frame % 50 == 0:
-        #   print(f'frame={frame}')
-        #   for i in range(n_verts):
-        #     print(f'  i={i} {xnp[i, :]}')
         gui.circles(xpos, radius=1.5, color=0xba543a)
         gui.show()
         frame += 1
@@ -434,7 +439,7 @@ def run_sim(x, b, r0, p0, v, mul_ans, f):
 def run_aot_shared(m, x, v, f):
     m.add_kernel(get_vertices)
     m.add_kernel(init, (x, v, f))
-    m.add_kernel(get_indices, (x,))
+    m.add_kernel(get_indices, (x, ))
     m.add_kernel(floor_bound, (x, v))
 
 
@@ -444,17 +449,16 @@ def run_aot_explicit(m, x, v, f):
 
 
 def run_aot_implicit(m, x, b, r0, p0, v, mul_ans, f):
-    # m.add_field('f', f)
-
     m.add_kernel(get_force, (x, f))
     m.add_kernel(get_b, (v, b, f))
     m.add_kernel(matmul_cell, (x, mul_ans))
     m.add_kernel(dot, (r0, r0))
     m.add_kernel(ndarray_to_ndarray, (p0, r0))
-    m.add_kernel(add1, (r0, b, mul_ans))
-    m.add_kernel(add2, (p0, r0))
-    m.add_kernel(add_ndarray, (x, v))
-    m.add_kernel(fill_ndarray, (f,))
+    m.add_kernel(add, (r0, b, mul_ans))
+    # m.add_kernel(add2, (p0, r0))
+    # m.add_kernel(add_ndarray, (x, v))
+    m.add_kernel(fill_ndarray, (f, ))
+
 
 def run_aot(x, b, r0, p0, v, mul_ans, f):
     dir_name = args.exp + '_fem'
@@ -483,6 +487,9 @@ if __name__ == '__main__':
     p0 = ti.Vector.ndarray(3, dtype=ti.f32, shape=n_verts)
 
     f = ti.Vector.ndarray(args.dim, dtype=ti.f32, shape=n_verts)
+
+    # gravity[None] = [0, -9.8, 0]
+    # gravity[None] = [-9.8, 0, 0]
 
     if args.aot:
         run_aot(x, b, r0, p0, v, mul_ans, f)

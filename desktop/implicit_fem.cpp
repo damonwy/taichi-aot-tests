@@ -13,7 +13,7 @@
 
 #define NR_PARTICLES 512
 // Uncomment this line to show explicit fem deomo
-//#define USE_EXPLICIT
+#define USE_EXPLICIT
 
 std::vector<std::string> get_required_instance_extensions() {
   uint32_t glfw_ext_count = 0;
@@ -66,7 +66,7 @@ int main() {
         return -1;
     }
 
-    float dt = 2e-4;
+    float dt = 1e-2;
 
     // Create a GGUI configuration
     taichi::ui::AppConfig app_config;
@@ -112,16 +112,17 @@ int main() {
     auto floor_bound_kernel = module->get_kernel("floor_bound");
     auto get_b_kernel = module->get_kernel("get_b");
     auto matmul_cell_kernel = module->get_kernel("matmul_cell");
-    auto add1_kernel = module->get_kernel("add1");
+    auto add_kernel = module->get_kernel("add");
     auto ndarray_to_ndarray_kernel = module->get_kernel("ndarray_to_ndarray");
     auto dot_kernel = module->get_kernel("dot");
-    auto add_ndarray_kernel = module->get_kernel("add_ndarray");
-    auto add2_kernel = module->get_kernel("add2");
+    //auto add_ndarray_kernel = module->get_kernel("add_ndarray");
+    //auto add2_kernel = module->get_kernel("add2");
     auto fill_ndarray_kernel = module->get_kernel("fill_ndarray");
 
     // Prepare Ndarray for model
     taichi::lang::Device::AllocParams alloc_params;
-    alloc_params.size = NR_PARTICLES * 3 * sizeof(float);
+    constexpr int kVecSize = 3;
+    alloc_params.size = NR_PARTICLES * kVecSize * sizeof(float);
     // x
     taichi::lang::DeviceAllocation devalloc_x = vulkan_runtime.get_ti_device()->allocate_memory(alloc_params);
     // v
@@ -140,17 +141,14 @@ int main() {
     taichi::lang::RuntimeContext host_ctx;
     memset(&host_ctx, 0, sizeof(taichi::lang::RuntimeContext));
     host_ctx.result_buffer = result_buffer;
-    // x
-    set_ctx_arg_devalloc(host_ctx, 0, devalloc_x);
-    // v
-    set_ctx_arg_devalloc(host_ctx, 1, devalloc_v);
-    // f
-    set_ctx_arg_devalloc(host_ctx, 2, devalloc_f);
 
     // Create a GUI even though it's not used in our case (required to
     // render the renderer)
     auto gui = std::make_shared<taichi::ui::vulkan::Gui>(&renderer->app_context(), &renderer->swap_chain(), window);
 
+    set_ctx_arg_devalloc(host_ctx, 0, devalloc_x);
+    set_ctx_arg_devalloc(host_ctx, 1, devalloc_v);
+    set_ctx_arg_devalloc(host_ctx, 2, devalloc_f);
     // get_vertices()
     get_vertices_kernel->launch(&host_ctx);
     // init(x, v, f)
@@ -172,6 +170,7 @@ int main() {
     f_info.dev_alloc    = devalloc_x;
     taichi::ui::CirclesInfo circles;
     circles.renderable_info.has_per_vertex_color = false;
+    circles.renderable_info.vbo_attrs = taichi::ui::VertexAttributes::kPos;
     circles.renderable_info.vbo                  = f_info;
     circles.color                                = {0.8, 0.4, 0.1};
     circles.radius                               = 0.005f; // 0.0015f looks unclear on desktop
@@ -184,15 +183,18 @@ int main() {
 #ifdef USE_EXPLICIT
         for (int i = 0; i < 40; i++) {
             // get_force(x, f)
+            set_ctx_arg_devalloc(host_ctx, 0, devalloc_x);
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_f);
             get_force_kernel->launch(&host_ctx);
             // advect(x, v, f)
+            set_ctx_arg_devalloc(host_ctx, 0, devalloc_x);
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_v);
             set_ctx_arg_devalloc(host_ctx, 2, devalloc_f);
             advect_kernel->launch(&host_ctx);
         }
 #else
-        // get_force(x)
+        // get_force(x, f)
+        set_ctx_arg_devalloc(host_ctx, 0, devalloc_x);
         set_ctx_arg_devalloc(host_ctx, 1, devalloc_f);
         get_force_kernel->launch(&host_ctx);
         // get_b(v, b, f)
@@ -202,15 +204,16 @@ int main() {
         get_b_kernel->launch(&host_ctx);
 
         // matmul_cell(v, mul_ans)
+        set_ctx_arg_devalloc(host_ctx, 0, devalloc_v);
         set_ctx_arg_devalloc(host_ctx, 1, devalloc_mul_ans);
         matmul_cell_kernel->launch(&host_ctx);
 
-        // add1(r0, b, -1, mul_ans)
+        // add(r0, b, -1, mul_ans)
         set_ctx_arg_devalloc(host_ctx, 0, devalloc_r0);
         set_ctx_arg_devalloc(host_ctx, 1, devalloc_b);
         set_ctx_arg_float(host_ctx, 2, -1);
         set_ctx_arg_devalloc(host_ctx, 3, devalloc_mul_ans);
-        add1_kernel->launch(&host_ctx);
+        add_kernel->launch(&host_ctx);
 
         // ndarray_to_ndarray(p0, r0)
         set_ctx_arg_devalloc(host_ctx, 0, devalloc_p0);
@@ -239,17 +242,19 @@ int main() {
           vulkan_runtime.synchronize();
           float alpha = r_2_new / host_ctx.get_ret<float>(0);
 
-          // add_ndarray(v, p0, alpha)
+          // add(v, v, alpha, p0)
           set_ctx_arg_devalloc(host_ctx, 0, devalloc_v);
-          set_ctx_arg_devalloc(host_ctx, 1, devalloc_p0);
+          set_ctx_arg_devalloc(host_ctx, 1, devalloc_v);
           set_ctx_arg_float(host_ctx, 2, alpha);
-          add_ndarray_kernel->launch(&host_ctx);
+          set_ctx_arg_devalloc(host_ctx, 3, devalloc_p0);
+          add_kernel->launch(&host_ctx);
 
-          // add_ndarray(r0, mul_ans, -alpha)
+          // add(r0, r0, -alpha, mul_ans)
           set_ctx_arg_devalloc(host_ctx, 0, devalloc_r0);
-          set_ctx_arg_devalloc(host_ctx, 1, devalloc_mul_ans);
+          set_ctx_arg_devalloc(host_ctx, 1, devalloc_r0);
           set_ctx_arg_float(host_ctx, 2, -alpha);
-          add_ndarray_kernel->launch(&host_ctx);
+          set_ctx_arg_devalloc(host_ctx, 3, devalloc_mul_ans);
+          add_kernel->launch(&host_ctx);
 
           r_2 = r_2_new;
           // r_2_new = dot(r0, r0);
@@ -264,24 +269,28 @@ int main() {
 
           float beta = r_2_new / r_2;
 
-          // add2(p0, r0, beta)
+          // add(p0, r0, beta, p0)
           set_ctx_arg_devalloc(host_ctx, 0, devalloc_p0);
           set_ctx_arg_devalloc(host_ctx, 1, devalloc_r0);
           set_ctx_arg_float(host_ctx, 2, beta);
-          add2_kernel->launch(&host_ctx);
+          set_ctx_arg_devalloc(host_ctx, 3, devalloc_p0);
+          add_kernel->launch(&host_ctx);
         }
         // fill_ndarray(f, 0)
         set_ctx_arg_devalloc(host_ctx, 0, devalloc_f);
         set_ctx_arg_float(host_ctx, 1, 0);
         fill_ndarray_kernel->launch(&host_ctx);
 
-        // add_ndarray(x, v, dt)
+        // add(x, x, dt, v)
         set_ctx_arg_devalloc(host_ctx, 0, devalloc_x);
-        set_ctx_arg_devalloc(host_ctx, 1, devalloc_v);
+        set_ctx_arg_devalloc(host_ctx, 1, devalloc_x);
         set_ctx_arg_float(host_ctx, 2, dt);
-        add_ndarray_kernel->launch(&host_ctx);
+        set_ctx_arg_devalloc(host_ctx, 3, devalloc_v);
+        add_kernel->launch(&host_ctx);
 #endif
         // floor_bound(x, v)
+        set_ctx_arg_devalloc(host_ctx, 0, devalloc_x);
+        set_ctx_arg_devalloc(host_ctx, 1, devalloc_v);
         floor_bound_kernel->launch(&host_ctx);
         vulkan_runtime.synchronize();
 
