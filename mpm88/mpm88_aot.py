@@ -15,7 +15,7 @@ gravity = 9.8
 bound = 3
 E = 400
 
-pos = ti.Vector.ndarray(12, ti.f32, n_particles)
+pos = ti.Vector.ndarray(3, ti.f32, n_particles)
 x = ti.Vector.field(2, ti.f32, n_particles)
 v = ti.Vector.field(2, float, n_particles)
 C = ti.Matrix.field(2, 2, float, n_particles)
@@ -71,7 +71,7 @@ def substep(pos: ti.any_arr(element_dim=1)):
             new_C += 4 * weight * g_v.outer_product(dpos) / dx**2
         v[p] = new_v
         x[p] += dt * v[p]
-        pos[p] = [x[p][0], x[p][1], 0,0,0,0,0,0,0,0,0,0]
+        pos[p] = [x[p][0], x[p][1], 0]
         J[p] *= 1 + dt * new_C.trace()
         C[p] = new_C
 

@@ -91,7 +91,7 @@ int main() {
     host_ctx.set_arg(0, &devalloc_pos);
     host_ctx.set_device_allocation(0, true);
     host_ctx.extra_args[0][0] = 1;
-    host_ctx.extra_args[0][1] = 12;
+    host_ctx.extra_args[0][1] = 3;
     // host_ctx.extra_args[0][2] = 1;
 
     // Create a GUI even though it's not used in our case (required to
@@ -114,6 +114,7 @@ int main() {
     f_info.dev_alloc    = devalloc_pos;
     taichi::ui::CirclesInfo circles;
     circles.renderable_info.has_per_vertex_color = false;
+    circles.renderable_info.vbo_attrs = taichi::ui::VertexAttributes::kPos;
     circles.renderable_info.vbo                  = f_info;
     circles.color                                = {0.8, 0.4, 0.1};
     circles.radius                               = 0.005f; // 0.0015f looks unclear on desktop
