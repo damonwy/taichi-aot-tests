@@ -18,6 +18,10 @@
 #include <stdint.h>
 #include <vector>
 
+// Uncomment this line to show explicit fem deomo
+#define USE_EXPLICIT
+
+
 #define ALOGI(fmt, ...)                                                  \
   ((void)__android_log_print(ANDROID_LOG_INFO, "TaichiTest", "%s: " fmt, \
                              __FUNCTION__, ##__VA_ARGS__))
@@ -43,16 +47,37 @@ std::vector<std::string> get_required_device_extensions() {
   return extensions;
 }
 
-#define NR_PARTICLES 8192
+void set_ctx_arg_devalloc(taichi::lang::RuntimeContext &host_ctx, int arg_id, taichi::lang::DeviceAllocation& alloc) {
+  host_ctx.set_arg(arg_id, &alloc);
+  host_ctx.set_device_allocation(arg_id, true);
+  // This is hack since our ndarrays happen to have exactly the same size in implicit_fem demo.
+  host_ctx.extra_args[arg_id][0] = 512;
+  host_ctx.extra_args[arg_id][1] = 3;
+}
+
+// TODO: provide a proper API from taichi
+void set_ctx_arg_float(taichi::lang::RuntimeContext &host_ctx, int arg_id, float x) {
+  host_ctx.set_arg(arg_id, x);
+  host_ctx.set_device_allocation(arg_id, false);
+}
+
+#define NR_PARTICLES 512
 
 std::unique_ptr<taichi::lang::MemoryPool> memory_pool;
 std::unique_ptr<taichi::lang::vulkan::VkRuntime> vulkan_runtime;
 taichi::lang::aot::Kernel* init_kernel;
-taichi::lang::aot::Kernel* substep_kernel;
+taichi::lang::aot::Kernel* get_vertices_kernel;
+taichi::lang::aot::Kernel* get_indices_kernel;
+taichi::lang::aot::Kernel* get_force_kernel;
+taichi::lang::aot::Kernel* advect_kernel;
+taichi::lang::aot::Kernel* floor_bound_kernel;
+
 std::unique_ptr<taichi::lang::aot::Module> module;
 taichi::ui::vulkan::Renderer *renderer;
 taichi::ui::vulkan::Gui *gui;
 taichi::lang::DeviceAllocation dalloc_circles;
+taichi::lang::DeviceAllocation dalloc_v;
+taichi::lang::DeviceAllocation dalloc_f;
 taichi::ui::CirclesInfo circles;
 taichi::lang::RuntimeContext host_ctx;
 
@@ -75,7 +100,7 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
 
   // Create a GGUI configuration
   taichi::ui::AppConfig app_config;
-  app_config.name = "MPM88";
+  app_config.name = "FEM";
   app_config.width = ANativeWindow_getWidth(native_window);
   app_config.height = ANativeWindow_getHeight(native_window);
   app_config.vsync = true;
@@ -84,6 +109,7 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   app_config.ti_arch = taichi::Arch::vulkan;
   renderer = new taichi::ui::vulkan::Renderer();
   renderer->init(nullptr, native_window, app_config);
+  ALOGI("width %d height %d", app_config.width, app_config.height);
 
   // Create a GUI even though it's not used in our case (required to
   // render the renderer)
@@ -98,26 +124,38 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   vulkan_runtime =
       std::make_unique<taichi::lang::vulkan::VkRuntime>(std::move(params));
 
-  taichi::lang::vulkan::AotModuleParams aot_params{"/data/local/tmp/mpm88", vulkan_runtime.get()};
+#ifdef USE_EXPLICIT
+    std::string shader_source = "/data/local/tmp/explicit_fem";
+#else
+    std::string shader_source = "/data/local/tmp/implicit_fem";
+#endif
+
+  taichi::lang::vulkan::AotModuleParams aot_params{shader_source, vulkan_runtime.get()};
   module = taichi::lang::aot::Module::load(taichi::Arch::vulkan, aot_params);
   // Retrieve kernels/fields/etc from AOT module so we can initialize our
   // runtime
   auto root_size = module->get_root_size();
-    ALOGI("root buffer size=%d\n", root_size);
+  ALOGI("root buffer size=%d\n", root_size);
 
-    vulkan_runtime->add_root_buffer(root_size);
+  vulkan_runtime->add_root_buffer(root_size);
+  get_vertices_kernel = module->get_kernel("get_vertices");
   init_kernel = module->get_kernel("init");
-  substep_kernel = module->get_kernel("substep");
+  get_indices_kernel = module->get_kernel("get_indices");
+
+  get_force_kernel = module->get_kernel("get_force");
+  advect_kernel = module->get_kernel("advect");
+  floor_bound_kernel = module->get_kernel("floor_bound");
 
 
   ALOGI("Register kernels");
 
   // Allocate memory for Circles position
   taichi::lang::Device::AllocParams alloc_params;
-  //alloc_params.size = NR_PARTICLES * sizeof(taichi::ui::Vertex);
   alloc_params.size = NR_PARTICLES * 3 * sizeof(float);
-  dalloc_circles =
-    vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
+  ALOGI("allocated %d", alloc_params.size);
+  dalloc_circles = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
+  dalloc_v = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
+  dalloc_f = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
   ALOGI("Allocate memory");
 
   // Describe information to render the circle with Vulkan
@@ -136,18 +174,16 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   circles.renderable_info.vbo_attrs = taichi::ui::VertexAttributes::kPos;
   circles.renderable_info.vbo                  = f_info;
   circles.color                                = {0.8, 0.4, 0.1};
-  circles.radius                               = 0.0015f;
+  circles.radius                               = 0.002f;
 
 
-  host_ctx.set_arg(0, &dalloc_circles);
-  host_ctx.set_device_allocation(0, true);
-  host_ctx.extra_args[0][0] = 1;
-  host_ctx.extra_args[0][1] = 3;
-  host_ctx.extra_args[0][2] = 1;
+  set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
+  set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
+  set_ctx_arg_devalloc(host_ctx, 2, dalloc_f);
 
-
-  //vulkan_runtime->launch_kernel(init_kernel_handle, &host_ctx);
+  get_vertices_kernel->launch(&host_ctx);
   init_kernel->launch(&host_ctx);
+  get_indices_kernel->launch(&host_ctx);
   vulkan_runtime->synchronize();
   ALOGI("launch kernel init");
 
@@ -198,18 +234,28 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
                                                           jclass,
                                                           jobject surface) {
-  // taichi::lang::RuntimeContext host_ctx;
-
   // timer starts before launch kernel
   auto start = std::chrono  ::steady_clock::now();
-  ALOGI("before launch kernel substep");
 
-  // Run 'substep' 50 times
-  for (int i = 0; i < 50; i++) {
-    //vulkan_runtime->launch_kernel(substep_kernel_handle, &host_ctx);
-    substep_kernel->launch(&host_ctx);
+  ALOGI("before launch kernel substep");
+  // Run 'substep' 40 times
+#ifdef USE_EXPLICIT
+  for (int i = 0; i < 40; i++) {
+    //get_force(x, f)
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_f);
+    get_force_kernel->launch(&host_ctx);
+    // advect(x, v, f)
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
+    set_ctx_arg_devalloc(host_ctx, 2, dalloc_f);
+    advect_kernel->launch(&host_ctx);
   }
-  ALOGI("launch kernel substep");
+  floor_bound_kernel->launch(&host_ctx);
+  ALOGI("launch kernel floor_bound");
+#else
+#endif
+
 
   // Make sure to sync the GPU memory so we can read the latest update from CPU
   // And read the 'x' calculated on GPU to our local variable
@@ -220,7 +266,7 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   // timer ends after synchronization
   auto end = std::chrono::steady_clock::now();
   auto cpu_time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-  ALOGI("Execution time is %" PRId64 "ns\n", cpu_time);
+  //ALOGI("Execution time is %" PRId64 "ns\n", cpu_time);
 
   // Render the UI
   renderer->circles(circles);

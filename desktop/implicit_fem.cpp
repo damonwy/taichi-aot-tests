@@ -45,7 +45,7 @@ void set_ctx_arg_devalloc(taichi::lang::RuntimeContext &host_ctx, int arg_id, ta
   // This is hack since our ndarrays happen to have exactly the same size in implicit_fem demo.
   host_ctx.extra_args[arg_id][0] = 512;
   host_ctx.extra_args[arg_id][1] = 3;
-  host_ctx.extra_args[arg_id][2] = 1;
+  //host_ctx.extra_args[arg_id][2] = 1;
 }
 
 // TODO: provide a proper API from taichi

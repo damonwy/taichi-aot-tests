@@ -42,7 +42,7 @@ def compute_indices_shape():
 
 # Taichi fields
 ox = ti.Vector.field(args.dim, dtype=ti.f32, shape=n_verts)
-m = ti.field(dtype=ti.f32, shape=n_verts)
+mod = ti.field(dtype=ti.f32, shape=n_verts)
 
 vertices = ti.Vector.field(4, dtype=ti.i32, shape=n_cells)
 
@@ -116,14 +116,14 @@ def get_force(x: ti.any_arr(), f: ti.any_arr()):
     for c in vertices:
         get_force_func(c, vertices[c], x, f)
     for u in f:
-        f[u].y -= 9.8 * m[u]
-        # f[u] += gravity[None] * m[u]
+        f[u].y -= 9.8 * mod[u]
+        # f[u] += gravity[None] * mod[u]
 
 
 @ti.kernel
 def matmul_cell(vel: ti.any_arr(), ret: ti.any_arr()):
     for i in ret:
-        ret[i] = vel[i] * m[i]
+        ret[i] = vel[i] * mod[i]
     for c in vertices:
         verts = vertices[c]
         W_c = W[c]
@@ -177,7 +177,7 @@ def dot(a: ti.any_arr(), b: ti.any_arr()) -> ti.f32:
 @ti.kernel
 def get_b(v: ti.any_arr(), b: ti.any_arr(), f: ti.any_arr()):
     for i in b:
-        b[i] = m[i] * v[i] + dt * f[i]
+        b[i] = mod[i] * v[i] + dt * f[i]
 
 
 # TODO: this is a built-in kernel.
@@ -314,7 +314,7 @@ def cg_cgraphed():
 @ti.kernel
 def advect(x: ti.any_arr(), v: ti.any_arr(), f: ti.any_arr()):
     for p in x:
-        v[p] += dt * (f[p] / m[p])
+        v[p] += dt * (f[p] / mod[p])
         x[p] += dt * v[p]
         f[p] = ti.Vector([0, 0, 0])
 
@@ -322,16 +322,18 @@ def advect(x: ti.any_arr(), v: ti.any_arr(), f: ti.any_arr()):
 @ti.kernel
 def init(x: ti.any_arr(), v: ti.any_arr(), f: ti.any_arr()):
     for u in x:
+        # x[u] = ox[0]
+        # x[u] = [1.0, 1.0, 0.1]
         x[u] = ox[u]
         v[u] = [0.0] * 3
         f[u] = [0.0] * 3
-        m[u] = 0.0
+        mod[u] = 0.0
     for c in vertices:
         F = Ds(vertices[c], x)
         B[c] = F.inverse()
         W[c] = ti.abs(F.determinant()) / 6
         for i in ti.static(range(4)):
-            m[vertices[c][i]] += W[c] / 4 * density
+            mod[vertices[c][i]] += W[c] / 4 * density
     for u in x:
         x[u].y += 1.0
 
@@ -405,6 +407,8 @@ def substep(x, b, v, r0, p0, mul_ans, f):
 def run_sim(x, b, r0, p0, v, mul_ans, f):
     get_vertices()
     init(x, v, f)
+    print('ox', ox.to_numpy().shape, ox.to_numpy())
+    print('pos', x.to_numpy().shape, x.to_numpy())
     get_indices(x)
     print(f'init:\n{x.to_numpy()}\n')
 
@@ -441,7 +445,12 @@ def run_aot_shared(m, x, v, f):
     m.add_kernel(init, (x, v, f))
     m.add_kernel(get_indices, (x, ))
     m.add_kernel(floor_bound, (x, v))
-
+    m.add_field('ox', ox)
+    m.add_field('mod', mod)
+    m.add_field('vertices', vertices)
+    m.add_field('B', B)
+    m.add_field('vertices', vertices)
+    m.add_field('W', W)
 
 def run_aot_explicit(m, x, v, f):
     m.add_kernel(get_force, (x, f))
@@ -465,15 +474,15 @@ def run_aot(x, b, r0, p0, v, mul_ans, f):
     shutil.rmtree(dir_name, ignore_errors=True)
     pathlib.Path(dir_name).mkdir(parents=True, exist_ok=False)
 
-    m = ti.aot.Module(ti.metal)
+    mod = ti.aot.Module(ti.metal)
 
-    run_aot_shared(m, x, v, f)
+    run_aot_shared(mod, x, v, f)
     if args.exp == 'explicit':
-        run_aot_explicit(m, x, v, f)
+        run_aot_explicit(mod, x, v, f)
     else:
-        run_aot_implicit(m, x, b, r0, p0, v, mul_ans, f)
+        run_aot_implicit(mod, x, b, r0, p0, v, mul_ans, f)
 
-    m.save(dir_name, 'fem')
+    mod.save(dir_name, 'fem')
     print('AOT done')
 
 
