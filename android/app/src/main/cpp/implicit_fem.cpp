@@ -71,6 +71,12 @@ taichi::lang::aot::Kernel* get_indices_kernel;
 taichi::lang::aot::Kernel* get_force_kernel;
 taichi::lang::aot::Kernel* advect_kernel;
 taichi::lang::aot::Kernel* floor_bound_kernel;
+taichi::lang::aot::Kernel* get_b_kernel;
+taichi::lang::aot::Kernel* matmul_cell_kernel;
+taichi::lang::aot::Kernel* ndarray_to_ndarray_kernel;
+taichi::lang::aot::Kernel* fill_ndarray_kernel;
+taichi::lang::aot::Kernel* dot_kernel;
+taichi::lang::aot::Kernel* add_kernel;
 
 std::unique_ptr<taichi::lang::aot::Module> module;
 taichi::ui::vulkan::Renderer *renderer;
@@ -78,6 +84,10 @@ taichi::ui::vulkan::Gui *gui;
 taichi::lang::DeviceAllocation dalloc_circles;
 taichi::lang::DeviceAllocation dalloc_v;
 taichi::lang::DeviceAllocation dalloc_f;
+taichi::lang::DeviceAllocation dalloc_b;
+taichi::lang::DeviceAllocation dalloc_mul_ans;
+taichi::lang::DeviceAllocation dalloc_r0;
+taichi::lang::DeviceAllocation dalloc_p0;
 taichi::ui::CirclesInfo circles;
 taichi::lang::RuntimeContext host_ctx;
 
@@ -98,6 +108,8 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
       sizeof(taichi::uint64) * taichi_result_buffer_entries, 8);
   ALOGI("Created a memory pool");
 
+  memset(&host_ctx, 0, sizeof(taichi::lang::RuntimeContext));
+  host_ctx.result_buffer = result_buffer;
   // Create a GGUI configuration
   taichi::ui::AppConfig app_config;
   app_config.name = "FEM";
@@ -146,6 +158,13 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   advect_kernel = module->get_kernel("advect");
   floor_bound_kernel = module->get_kernel("floor_bound");
 
+  get_b_kernel = module->get_kernel("get_b");
+  matmul_cell_kernel = module->get_kernel("matmul_cell");
+  add_kernel = module->get_kernel("add");
+  ndarray_to_ndarray_kernel = module->get_kernel("ndarray_to_ndarray");
+  dot_kernel = module->get_kernel("dot");
+  fill_ndarray_kernel = module->get_kernel("fill_ndarray");
+
 
   ALOGI("Register kernels");
 
@@ -156,6 +175,11 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   dalloc_circles = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
   dalloc_v = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
   dalloc_f = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
+  dalloc_b = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
+  dalloc_mul_ans = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
+  dalloc_r0 = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
+  dalloc_p0 = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
+
   ALOGI("Allocate memory");
 
   // Describe information to render the circle with Vulkan
@@ -176,14 +200,17 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   circles.color                                = {0.8, 0.4, 0.1};
   circles.radius                               = 0.002f;
 
-
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
   set_ctx_arg_devalloc(host_ctx, 2, dalloc_f);
 
+  // get_vertices()
   get_vertices_kernel->launch(&host_ctx);
+  // init(x, v, f)
   init_kernel->launch(&host_ctx);
+  // get_indices(x)
   get_indices_kernel->launch(&host_ctx);
+
   vulkan_runtime->synchronize();
   ALOGI("launch kernel init");
 
@@ -237,6 +264,7 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   // timer starts before launch kernel
   auto start = std::chrono  ::steady_clock::now();
 
+  float dt = 1e-2;
   ALOGI("before launch kernel substep");
   // Run 'substep' 40 times
 #ifdef USE_EXPLICIT
@@ -251,12 +279,106 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
     set_ctx_arg_devalloc(host_ctx, 2, dalloc_f);
     advect_kernel->launch(&host_ctx);
   }
+#else
+  // get_force(x, f)
+  set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
+  set_ctx_arg_devalloc(host_ctx, 1, dalloc_f);
+  get_force_kernel->launch(&host_ctx);
+  // get_b(v, b, f)
+  set_ctx_arg_devalloc(host_ctx, 0, dalloc_v);
+  set_ctx_arg_devalloc(host_ctx, 1, dalloc_b);
+  set_ctx_arg_devalloc(host_ctx, 2, dalloc_f);
+  get_b_kernel->launch(&host_ctx);
+
+  // matmul_cell(v, mul_ans)
+  set_ctx_arg_devalloc(host_ctx, 0, dalloc_v);
+  set_ctx_arg_devalloc(host_ctx, 1, dalloc_mul_ans);
+  matmul_cell_kernel->launch(&host_ctx);
+
+  // add(r0, b, -1, mul_ans)
+  set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
+  set_ctx_arg_devalloc(host_ctx, 1, dalloc_b);
+  set_ctx_arg_float(host_ctx, 2, -1);
+  set_ctx_arg_devalloc(host_ctx, 3, dalloc_mul_ans);
+  add_kernel->launch(&host_ctx);
+
+  // ndarray_to_ndarray(p0, r0)
+  set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
+  set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
+  ndarray_to_ndarray_kernel->launch(&host_ctx);
+
+  // r_2 = dot(r0, r0)
+  set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
+  set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
+  dot_kernel->launch(&host_ctx);
+  float r_2 = host_ctx.get_ret<float>(0);
+
+  int n_iter = 8;
+  float epsilon = 1e-6;
+  float r_2_init = r_2;
+  float r_2_new = r_2;
+
+  for (int i = 0; i < n_iter; ++i) {
+    // matmul_cell(p0, mul_ans)
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_mul_ans);
+    matmul_cell_kernel->launch(&host_ctx);
+
+    // alpha = r_2_new / dot(p0, mul_ans)
+    dot_kernel->launch(&host_ctx);
+    vulkan_runtime->synchronize();
+    float alpha = r_2_new / host_ctx.get_ret<float>(0);
+
+    // add(v, v, alpha, p0)
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_v);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
+    set_ctx_arg_float(host_ctx, 2, alpha);
+    set_ctx_arg_devalloc(host_ctx, 3, dalloc_p0);
+    add_kernel->launch(&host_ctx);
+
+    // add(r0, r0, -alpha, mul_ans)
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
+    set_ctx_arg_float(host_ctx, 2, -alpha);
+    set_ctx_arg_devalloc(host_ctx, 3, dalloc_mul_ans);
+    add_kernel->launch(&host_ctx);
+
+    r_2 = r_2_new;
+    // r_2_new = dot(r0, r0);
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
+    dot_kernel->launch(&host_ctx);
+    vulkan_runtime->synchronize();
+    r_2_new = host_ctx.get_ret<float>(0);
+
+    // if r_2_new <= r_2_init * epsilon ** 2: break
+    if (r_2_new <= r_2_init * epsilon * epsilon) {break;}
+
+    float beta = r_2_new / r_2;
+
+    // add(p0, r0, beta, p0)
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
+    set_ctx_arg_float(host_ctx, 2, beta);
+    set_ctx_arg_devalloc(host_ctx, 3, dalloc_p0);
+    add_kernel->launch(&host_ctx);
+  }
+  // fill_ndarray(f, 0)
+  set_ctx_arg_devalloc(host_ctx, 0, dalloc_f);
+  set_ctx_arg_float(host_ctx, 1, 0);
+  fill_ndarray_kernel->launch(&host_ctx);
+
+  // add(x, x, dt, v)
+  set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
+  set_ctx_arg_devalloc(host_ctx, 1, dalloc_circles);
+  set_ctx_arg_float(host_ctx, 2, dt);
+  set_ctx_arg_devalloc(host_ctx, 3, dalloc_v);
+  add_kernel->launch(&host_ctx);
+#endif
+  set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
+  set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
   floor_bound_kernel->launch(&host_ctx);
   ALOGI("launch kernel floor_bound");
-#else
-#endif
-
-
   // Make sure to sync the GPU memory so we can read the latest update from CPU
   // And read the 'x' calculated on GPU to our local variable
   // @TODO: Skip this with support of NdArray as we will be able to specify 'dalloc_circles'
