@@ -75,8 +75,10 @@ taichi::lang::aot::Kernel* get_b_kernel;
 taichi::lang::aot::Kernel* matmul_cell_kernel;
 taichi::lang::aot::Kernel* ndarray_to_ndarray_kernel;
 taichi::lang::aot::Kernel* fill_ndarray_kernel;
+taichi::lang::aot::Kernel* add_ndarray_kernel;
 taichi::lang::aot::Kernel* dot_kernel;
 taichi::lang::aot::Kernel* add_kernel;
+taichi::lang::aot::Kernel* debug_kernel;
 
 std::unique_ptr<taichi::lang::aot::Module> module;
 taichi::ui::vulkan::Renderer *renderer;
@@ -88,8 +90,12 @@ taichi::lang::DeviceAllocation dalloc_b;
 taichi::lang::DeviceAllocation dalloc_mul_ans;
 taichi::lang::DeviceAllocation dalloc_r0;
 taichi::lang::DeviceAllocation dalloc_p0;
-taichi::ui::CirclesInfo circles;
+//taichi::ui::CirclesInfo circles;
+taichi::ui::RenderableInfo r_info;
 taichi::lang::RuntimeContext host_ctx;
+std::unique_ptr<taichi::ui::SceneBase> scene;
+taichi::ui::ParticlesInfo p_info;
+taichi::ui::Camera camera;
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
@@ -163,7 +169,9 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   add_kernel = module->get_kernel("add");
   ndarray_to_ndarray_kernel = module->get_kernel("ndarray_to_ndarray");
   dot_kernel = module->get_kernel("dot");
+  add_ndarray_kernel = module->get_kernel("add_ndarray");
   fill_ndarray_kernel = module->get_kernel("fill_ndarray");
+  debug_kernel = module->get_kernel("debug");
 
 
   ALOGI("Register kernels");
@@ -194,11 +202,23 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   f_info.snode        = nullptr;
   f_info.dev_alloc    = dalloc_circles;
 
-  circles.renderable_info.has_per_vertex_color = false;
-  circles.renderable_info.vbo_attrs = taichi::ui::VertexAttributes::kPos;
-  circles.renderable_info.vbo                  = f_info;
-  circles.color                                = {0.8, 0.4, 0.1};
-  circles.radius                               = 0.002f;
+  //circles.renderable_info.has_per_vertex_color = false;
+  //circles.renderable_info.vbo_attrs = taichi::ui::VertexAttributes::kPos;
+  //circles.renderable_info.vbo                  = f_info;
+  //circles.color                                = {0.8, 0.4, 0.1};
+  //circles.radius                               = 0.002f;
+  r_info.vbo = f_info;
+  r_info.has_per_vertex_color = false;
+  r_info.vbo_attrs = taichi::ui::VertexAttributes::kPos;
+  p_info.renderable_info = r_info;
+  p_info.color = {1.0, 1.0, 1.0};
+  p_info.radius = 0.008;
+  camera.position = {5,0,0};
+  camera.lookat = {0,0,0};
+  camera.up = {0, 1, 0};
+  scene = std::make_unique<taichi::ui::SceneBase>();
+  renderer->set_background_color({0.6, 0.6, 0.6});
+
 
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
@@ -215,7 +235,7 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   ALOGI("launch kernel init");
 
   // Clear the background
-  renderer->set_background_color({0.6, 0.6, 0.6});
+  //renderer->set_background_color({0.6, 0.6, 0.6});
 
 #if 0
   // Sanity check to make sure the shaders are running properly, we should have
@@ -265,9 +285,9 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   auto start = std::chrono  ::steady_clock::now();
 
   float dt = 1e-2;
-  ALOGI("before launch kernel substep");
-  // Run 'substep' 40 times
+  //ALOGI("before launch kernel substep");
 #ifdef USE_EXPLICIT
+  // Run 'substep' 40 times
   for (int i = 0; i < 40; i++) {
     //get_force(x, f)
     set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
@@ -311,7 +331,9 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
   dot_kernel->launch(&host_ctx);
+  vulkan_runtime->synchronize();
   float r_2 = host_ctx.get_ret<float>(0);
+  ALOGI("r_2: %f", r_2);
 
   int n_iter = 8;
   float epsilon = 1e-6;
@@ -323,27 +345,49 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
     set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
     set_ctx_arg_devalloc(host_ctx, 1, dalloc_mul_ans);
     matmul_cell_kernel->launch(&host_ctx);
+    //vulkan_runtime->synchronize();
+
+    //debug_kernel->launch(&host_ctx);
+    //vulkan_runtime->synchronize();
+    //float ddd = host_ctx.get_ret<float>(0);
+    //ALOGI("ddd: %f", ddd);
 
     // alpha = r_2_new / dot(p0, mul_ans)
     dot_kernel->launch(&host_ctx);
     vulkan_runtime->synchronize();
     float alpha = r_2_new / host_ctx.get_ret<float>(0);
+    ALOGI("alpha: %f", alpha);
 
-    // add(v, v, alpha, p0)
+    // OLD:add(v, v, alpha, p0)
+    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_v);
+    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
+    //set_ctx_arg_float(host_ctx, 2, alpha);
+    //set_ctx_arg_devalloc(host_ctx, 3, dalloc_p0);
+    //add_kernel->launch(&host_ctx);
+    //vulkan_runtime->synchronize();
+
+    //// OLD:add(r0, r0, -alpha, mul_ans)
+    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
+    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
+    //set_ctx_arg_float(host_ctx, 2, -alpha);
+    //set_ctx_arg_devalloc(host_ctx, 3, dalloc_mul_ans);
+    //add_kernel->launch(&host_ctx);
+    //vulkan_runtime->synchronize();
+
+    // add_ndarray(v, p0, alpha)
     set_ctx_arg_devalloc(host_ctx, 0, dalloc_v);
-    set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_p0);
     set_ctx_arg_float(host_ctx, 2, alpha);
-    set_ctx_arg_devalloc(host_ctx, 3, dalloc_p0);
-    add_kernel->launch(&host_ctx);
+    add_ndarray_kernel->launch(&host_ctx);
 
-    // add(r0, r0, -alpha, mul_ans)
+    // add_ndarray(r0, mul_ans, -alpha)
     set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
-    set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_mul_ans);
     set_ctx_arg_float(host_ctx, 2, -alpha);
-    set_ctx_arg_devalloc(host_ctx, 3, dalloc_mul_ans);
-    add_kernel->launch(&host_ctx);
+    add_ndarray_kernel->launch(&host_ctx);
 
     r_2 = r_2_new;
+
     // r_2_new = dot(r0, r0);
     set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
     set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
@@ -351,17 +395,21 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
     vulkan_runtime->synchronize();
     r_2_new = host_ctx.get_ret<float>(0);
 
+    ALOGI("r_2_new: %f", r_2_new);
+
     // if r_2_new <= r_2_init * epsilon ** 2: break
     if (r_2_new <= r_2_init * epsilon * epsilon) {break;}
 
     float beta = r_2_new / r_2;
 
+    ALOGI("beta: %f", beta);
     // add(p0, r0, beta, p0)
     set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
     set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
     set_ctx_arg_float(host_ctx, 2, beta);
     set_ctx_arg_devalloc(host_ctx, 3, dalloc_p0);
     add_kernel->launch(&host_ctx);
+    vulkan_runtime->synchronize();
   }
   // fill_ndarray(f, 0)
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_f);
@@ -369,11 +417,17 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   fill_ndarray_kernel->launch(&host_ctx);
 
   // add(x, x, dt, v)
+  /*
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_circles);
   set_ctx_arg_float(host_ctx, 2, dt);
   set_ctx_arg_devalloc(host_ctx, 3, dalloc_v);
   add_kernel->launch(&host_ctx);
+  */
+  set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
+  set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
+  set_ctx_arg_float(host_ctx, 2, dt);
+  add_ndarray_kernel->launch(&host_ctx);
 #endif
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
@@ -391,7 +445,12 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   //ALOGI("Execution time is %" PRId64 "ns\n", cpu_time);
 
   // Render the UI
-  renderer->circles(circles);
+  //renderer->circles(circles);
+  scene->set_camera(camera);
+  scene->particles(p_info);
+  scene->ambient_light({1.0, 1.0, 1.0});
+  scene->point_light({0, 0, 0}, {0, 0, 0});
+  renderer->scene(static_cast<taichi::ui::vulkan::Scene*>(scene.get()));
   renderer->draw_frame(gui);
   renderer->swap_chain().surface().present_image();
   renderer->prepare_for_next_frame();
