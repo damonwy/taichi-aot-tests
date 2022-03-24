@@ -19,7 +19,7 @@
 #include <vector>
 
 // Uncomment this line to show explicit fem deomo
-#define USE_EXPLICIT
+//#define USE_EXPLICIT
 
 
 #define ALOGI(fmt, ...)                                                  \
@@ -47,12 +47,12 @@ std::vector<std::string> get_required_device_extensions() {
   return extensions;
 }
 
-void set_ctx_arg_devalloc(taichi::lang::RuntimeContext &host_ctx, int arg_id, taichi::lang::DeviceAllocation& alloc) {
+void set_ctx_arg_devalloc(taichi::lang::RuntimeContext &host_ctx, int arg_id, taichi::lang::DeviceAllocation& alloc, int n=512, int m=3) {
   host_ctx.set_arg(arg_id, &alloc);
   host_ctx.set_device_allocation(arg_id, true);
   // This is hack since our ndarrays happen to have exactly the same size in implicit_fem demo.
-  host_ctx.extra_args[arg_id][0] = 512;
-  host_ctx.extra_args[arg_id][1] = 3;
+  host_ctx.extra_args[arg_id][0] = n;
+  host_ctx.extra_args[arg_id][1] = m;
 }
 
 // TODO: provide a proper API from taichi
@@ -79,6 +79,11 @@ taichi::lang::aot::Kernel* add_ndarray_kernel;
 taichi::lang::aot::Kernel* dot_kernel;
 taichi::lang::aot::Kernel* add_kernel;
 taichi::lang::aot::Kernel* debug_kernel;
+taichi::lang::aot::Kernel* update_alpha_kernel;
+taichi::lang::aot::Kernel* update_beta_r_2_kernel;
+taichi::lang::aot::Kernel* add_hack_kernel;
+taichi::lang::aot::Kernel* dot2scalar_kernel;
+taichi::lang::aot::Kernel* init_r_2_kernel;
 
 std::unique_ptr<taichi::lang::aot::Module> module;
 taichi::ui::vulkan::Renderer *renderer;
@@ -90,6 +95,8 @@ taichi::lang::DeviceAllocation dalloc_b;
 taichi::lang::DeviceAllocation dalloc_mul_ans;
 taichi::lang::DeviceAllocation dalloc_r0;
 taichi::lang::DeviceAllocation dalloc_p0;
+taichi::lang::DeviceAllocation dalloc_alpha;
+taichi::lang::DeviceAllocation dalloc_beta;
 //taichi::ui::CirclesInfo circles;
 taichi::ui::RenderableInfo r_info;
 taichi::lang::RuntimeContext host_ctx;
@@ -172,6 +179,11 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   add_ndarray_kernel = module->get_kernel("add_ndarray");
   fill_ndarray_kernel = module->get_kernel("fill_ndarray");
   debug_kernel = module->get_kernel("debug");
+  init_r_2_kernel = module->get_kernel("init_r_2");
+  update_alpha_kernel = module->get_kernel("update_alpha");
+  update_beta_r_2_kernel = module->get_kernel("update_beta_r_2");
+  add_hack_kernel = module->get_kernel("add_hack");
+  dot2scalar_kernel = module->get_kernel("dot2scalar");
 
 
   ALOGI("Register kernels");
@@ -187,6 +199,10 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   dalloc_mul_ans = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
   dalloc_r0 = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
   dalloc_p0 = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
+
+  alloc_params.size = sizeof(float);
+  dalloc_alpha = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
+  dalloc_beta = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
 
   ALOGI("Allocate memory");
 
@@ -327,18 +343,25 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
   ndarray_to_ndarray_kernel->launch(&host_ctx);
 
-  // r_2 = dot(r0, r0)
+  // dot2scalar(r0, r0)
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
-  dot_kernel->launch(&host_ctx);
-  vulkan_runtime->synchronize();
-  float r_2 = host_ctx.get_ret<float>(0);
-  ALOGI("r_2: %f", r_2);
+  dot2scalar_kernel->launch(&host_ctx);
+
+  // init_r_2()
+  init_r_2_kernel->launch(&host_ctx);
+  //// r_2 = dot(r0, r0)
+  //set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
+  //set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
+  //dot_kernel->launch(&host_ctx);
+  //vulkan_runtime->synchronize();
+  //float r_2 = host_ctx.get_ret<float>(0);
+  //ALOGI("r_2: %f", r_2);
 
   int n_iter = 8;
-  float epsilon = 1e-6;
-  float r_2_init = r_2;
-  float r_2_new = r_2;
+  //float epsilon = 1e-6;
+  //float r_2_init = r_2;
+  //float r_2_new = r_2;
 
   for (int i = 0; i < n_iter; ++i) {
     // matmul_cell(p0, mul_ans)
@@ -347,16 +370,58 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
     matmul_cell_kernel->launch(&host_ctx);
     //vulkan_runtime->synchronize();
 
+    //// FIXME: For debug only
     //debug_kernel->launch(&host_ctx);
     //vulkan_runtime->synchronize();
     //float ddd = host_ctx.get_ret<float>(0);
     //ALOGI("ddd: %f", ddd);
 
-    // alpha = r_2_new / dot(p0, mul_ans)
-    dot_kernel->launch(&host_ctx);
-    vulkan_runtime->synchronize();
-    float alpha = r_2_new / host_ctx.get_ret<float>(0);
-    ALOGI("alpha: %f", alpha);
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_mul_ans);
+    dot2scalar_kernel->launch(&host_ctx);
+
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_alpha, 1, 1);
+    update_alpha_kernel->launch(&host_ctx);
+
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_v);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
+    set_ctx_arg_float(host_ctx, 2, 1);
+    set_ctx_arg_devalloc(host_ctx, 3, dalloc_alpha, 1, 1);
+    set_ctx_arg_devalloc(host_ctx, 4, dalloc_p0);
+    add_hack_kernel->launch(&host_ctx);
+
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
+    set_ctx_arg_float(host_ctx, 2, -1);
+    set_ctx_arg_devalloc(host_ctx, 3, dalloc_alpha, 1, 1);
+    set_ctx_arg_devalloc(host_ctx, 4, dalloc_mul_ans);
+    add_hack_kernel->launch(&host_ctx);
+
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
+    dot2scalar_kernel->launch(&host_ctx);
+
+
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_beta, 1, 1);
+    update_beta_r_2_kernel->launch(&host_ctx);
+
+    set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
+    set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
+    set_ctx_arg_float(host_ctx, 2, 1);
+    set_ctx_arg_devalloc(host_ctx, 3, dalloc_beta, 1, 1);
+    set_ctx_arg_devalloc(host_ctx, 4, dalloc_p0);
+    add_hack_kernel->launch(&host_ctx);
+
+    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
+    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_mul_ans);
+    //// alpha = r_2_new / dot(p0, mul_ans)
+    //dot_kernel->launch(&host_ctx);
+    //vulkan_runtime->synchronize();
+
+    //float temp = host_ctx.get_ret<float>(0);
+    //ALOGI("dot return: %f", temp);
+    //float alpha = r_2_new / temp;
+    //ALOGI("alpha: %f", alpha);
 
     // OLD:add(v, v, alpha, p0)
     //set_ctx_arg_devalloc(host_ctx, 0, dalloc_v);
@@ -374,42 +439,42 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
     //add_kernel->launch(&host_ctx);
     //vulkan_runtime->synchronize();
 
-    // add_ndarray(v, p0, alpha)
-    set_ctx_arg_devalloc(host_ctx, 0, dalloc_v);
-    set_ctx_arg_devalloc(host_ctx, 1, dalloc_p0);
-    set_ctx_arg_float(host_ctx, 2, alpha);
-    add_ndarray_kernel->launch(&host_ctx);
+    //// add_ndarray(v, p0, alpha)
+    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_v);
+    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_p0);
+    //set_ctx_arg_float(host_ctx, 2, alpha);
+    //add_ndarray_kernel->launch(&host_ctx);
 
-    // add_ndarray(r0, mul_ans, -alpha)
-    set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
-    set_ctx_arg_devalloc(host_ctx, 1, dalloc_mul_ans);
-    set_ctx_arg_float(host_ctx, 2, -alpha);
-    add_ndarray_kernel->launch(&host_ctx);
+    //// add_ndarray(r0, mul_ans, -alpha)
+    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
+    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_mul_ans);
+    //set_ctx_arg_float(host_ctx, 2, -alpha);
+    //add_ndarray_kernel->launch(&host_ctx);
 
-    r_2 = r_2_new;
+    //r_2 = r_2_new;
 
-    // r_2_new = dot(r0, r0);
-    set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
-    set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
-    dot_kernel->launch(&host_ctx);
-    vulkan_runtime->synchronize();
-    r_2_new = host_ctx.get_ret<float>(0);
+    //// r_2_new = dot(r0, r0);
+    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
+    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
+    //dot_kernel->launch(&host_ctx);
+    //vulkan_runtime->synchronize();
+    //r_2_new = host_ctx.get_ret<float>(0);
 
-    ALOGI("r_2_new: %f", r_2_new);
+    //ALOGI("r_2_new: %f", r_2_new);
 
-    // if r_2_new <= r_2_init * epsilon ** 2: break
-    if (r_2_new <= r_2_init * epsilon * epsilon) {break;}
+    //// if r_2_new <= r_2_init * epsilon ** 2: break
+    //if (r_2_new <= r_2_init * epsilon * epsilon) {break;}
 
-    float beta = r_2_new / r_2;
+    //float beta = r_2_new / r_2;
 
-    ALOGI("beta: %f", beta);
-    // add(p0, r0, beta, p0)
-    set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
-    set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
-    set_ctx_arg_float(host_ctx, 2, beta);
-    set_ctx_arg_devalloc(host_ctx, 3, dalloc_p0);
-    add_kernel->launch(&host_ctx);
-    vulkan_runtime->synchronize();
+    //ALOGI("beta: %f", beta);
+    //// add(p0, r0, beta, p0)
+    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
+    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
+    //set_ctx_arg_float(host_ctx, 2, beta);
+    //set_ctx_arg_devalloc(host_ctx, 3, dalloc_p0);
+    //add_kernel->launch(&host_ctx);
+    //vulkan_runtime->synchronize();
   }
   // fill_ndarray(f, 0)
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_f);
@@ -417,17 +482,17 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   fill_ndarray_kernel->launch(&host_ctx);
 
   // add(x, x, dt, v)
-  /*
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_circles);
   set_ctx_arg_float(host_ctx, 2, dt);
   set_ctx_arg_devalloc(host_ctx, 3, dalloc_v);
   add_kernel->launch(&host_ctx);
-  */
+  /*
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
   set_ctx_arg_float(host_ctx, 2, dt);
   add_ndarray_kernel->launch(&host_ctx);
+  */
 #endif
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
