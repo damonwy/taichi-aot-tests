@@ -259,7 +259,7 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   p_info.renderable_info = r_info;
   p_info.color = {1.0, 1.0, 1.0};
   p_info.radius = 0.008;
-  camera.position = {5,0,0};
+  camera.position = {4,0,0};
   camera.lookat = {0,0,0};
   camera.up = {0, 1, 0};
   scene = std::make_unique<taichi::ui::SceneBase>();
@@ -329,13 +329,21 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
                                                           jobject surface) {
   // timer starts before launch kernel
   auto start = std::chrono  ::steady_clock::now();
+  float g_x, g_y, g_z;
 
   if (sensor && !ASensorEventQueue_enableSensor(queue, sensor)) {
     int ident = ALooper_pollAll(kTimeoutMilliSecs, NULL, NULL, NULL);
     if (ident == kLooperId) {
       ASensorEvent data;
       if (ASensorEventQueue_getEvents(queue, &data, 1)) {
-        ALOGI("Acceleration: x = %f, y = %f, z = %f", data.acceleration.x, data.acceleration.y, data.acceleration.z);
+        //g_x = data.acceleration.z;
+        //g_y = data.acceleration.y;
+        //g_z = data.acceleration.x;
+
+        ALOGI("Acceleration: g_x = %f, g_y = %f, g_z = %f", data.acceleration.x, data.acceleration.y, data.acceleration.z);
+        g_x = 0.;
+        g_y = data.acceleration.y > 2 || data.acceleration.y < -2 ? -data.acceleration.y : 0;
+        g_z = data.acceleration.x > 2 || data.acceleration.x < -2 ? data.acceleration.x * 5 : 0;
       }
     }
   }
@@ -359,6 +367,9 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   // get_force(x, f)
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_f);
+  set_ctx_arg_float(host_ctx, 2, g_x);
+  set_ctx_arg_float(host_ctx, 3, g_y);
+  set_ctx_arg_float(host_ctx, 4, g_z);
   get_force_kernel->launch(&host_ctx);
   // get_b(v, b, f)
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_v);

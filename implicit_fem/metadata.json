@@ -96,11 +96,17 @@
                 "type": 0,
                 "id": 0},
               "binding": 2}]}],
-      "args_count": 2,
+      "args_count": 5,
       "rets_count": 0,
-      "args_buffer_size": 16,
+      "args_buffer_size": 28,
       "rets_buffer_size": 0,
-      "scalar_args": {},
+      "scalar_args": {"4": {
+          "dtype_name": "f32",
+          "offset_in_args_buf": 24},"2": {
+          "dtype_name": "f32",
+          "offset_in_args_buf": 16},"3": {
+          "dtype_name": "f32",
+          "offset_in_args_buf": 20}},
       "arr_args": {"1": {
           "dtype_name": "f32",
           "field_dim": 1,

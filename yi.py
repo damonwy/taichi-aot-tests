@@ -42,6 +42,7 @@ def compute_indices_shape():
 
 # Taichi fields
 ox = ti.Vector.field(args.dim, dtype=ti.f32, shape=n_verts)
+
 mod = ti.field(dtype=ti.f32, shape=n_verts)
 
 vertices = ti.Vector.field(4, dtype=ti.i32, shape=n_cells)
@@ -115,12 +116,12 @@ def get_force_func(c, verts, x: ti.template(), f: ti.template()):
 
 
 @ti.kernel
-def get_force(x: ti.any_arr(), f: ti.any_arr()):
+def get_force(x: ti.any_arr(), f: ti.any_arr(), g_x:ti.f32, g_y: ti.f32, g_z: ti.f32):
     for c in vertices:
         get_force_func(c, vertices[c], x, f)
     for u in f:
-        f[u].y -= 9.8 * mod[u]
-        # f[u] += gravity[None] * mod[u]
+        g = ti.Vector([g_x, g_y, g_z])
+        f[u] += g * mod[u]
 
 
 @ti.kernel
@@ -192,7 +193,7 @@ def dot2scalar(a: ti.any_arr(), b: ti.any_arr()):
 def get_b(v: ti.any_arr(), b: ti.any_arr(), f: ti.any_arr()):
     for i in b:
         b[i] = mod[i] * v[i] + dt * f[i]
-
+        #b[i] = mod[i] * v[i]
 
 # TODO: this is a built-in kernel.
 @ti.kernel
@@ -222,7 +223,7 @@ def update_beta_r_2(beta_scalar: ti.any_arr()):
 
 def cg(x, b, v, r0, p0, mul_ans, f, alpha_scalar, beta_scalar):
 
-    get_force(x, f)
+    get_force(x, f, 3, -9.8, 0)
     get_b(v, b, f)
     matmul_cell(v, mul_ans)
     add(r0, b, -1, mul_ans)
@@ -364,10 +365,15 @@ def init(x: ti.any_arr(), v: ti.any_arr(), f: ti.any_arr()):
 @ti.kernel
 def floor_bound(x: ti.any_arr(), v: ti.any_arr()):
     for u in x:
-        if x[u].y < 0:
-            x[u].y = 0
-            if v[u].y < 0:
-                v[u].y = 0
+        for i in ti.static(range(3)):
+            if x[u][i] < -1:
+                x[u][i] = -1
+                if v[u][i] < 0:
+                    v[u][i] = 0
+            if x[u][i] > 2:
+                x[u][i] = 2
+                if v[u][i] > 0:
+                    v[u][i] = 0
 
 
 @ti.func
@@ -527,8 +533,6 @@ if __name__ == '__main__':
 
     alpha_scalar = ti.ndarray(ti.f32, shape=())
     beta_scalar = ti.ndarray(ti.f32, shape=())
-    # gravity[None] = [0, -9.8, 0]
-    # gravity[None] = [-9.8, 0, 0]
 
     if args.aot:
         run_aot(x, b, r0, p0, v, mul_ans, f, alpha_scalar, beta_scalar)
