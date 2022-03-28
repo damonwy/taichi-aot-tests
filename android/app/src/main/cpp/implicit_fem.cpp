@@ -4,6 +4,7 @@
 #include <android/looper.h>
 #include <android/native_window_jni.h>
 #include <android/sensor.h>
+//#include <hardware/sensors.h>
 #include <jni.h>
 
 #include <taichi/backends/vulkan/vulkan_program.h>
@@ -104,11 +105,40 @@ std::unique_ptr<taichi::ui::SceneBase> scene;
 taichi::ui::ParticlesInfo p_info;
 taichi::ui::Camera camera;
 
+const int kNumEvents = 1;
+const int kTimeoutMilliSecs = 1000;
+const int kWaitTimeSecs = 1;
+const int kLooperId = 1;
+ASensorManager* sensor_manager;
+
+ASensorEventQueue* queue;
+const ASensor* sensor;
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
                                                         jclass,
                                                         jobject assets,
                                                         jobject surface) {
+  // Sensor
+  sensor_manager = ASensorManager_getInstanceForPackage("naboo");
+  if (!sensor_manager){
+      ALOGI("WRONG");
+      return;
+  }
+  ASensorList sensor_list;
+  int sensor_count = ASensorManager_getSensorList(sensor_manager, &sensor_list);
+  ALOGI("Found %d sensors", sensor_count);
+  for (int i = 0; i < sensor_count; i++) {
+    // Uncomment line below to show sensors on your device.
+    //ALOGI("Found %s", ASensor_getName(sensor_list[i]));
+  }
+  queue = ASensorManager_createEventQueue(sensor_manager, ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS), 1, NULL, NULL);
+  if (!queue){
+    ALOGI("INVALID QUEUE");
+    return;
+  }
+
+  sensor = ASensorManager_getDefaultSensor(sensor_manager, ASENSOR_TYPE_ACCELEROMETER);
   ANativeWindow *native_window = ANativeWindow_fromSurface(env, surface);
 
   // Initialize our Vulkan Program pipeline
@@ -299,6 +329,16 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
                                                           jobject surface) {
   // timer starts before launch kernel
   auto start = std::chrono  ::steady_clock::now();
+
+  if (sensor && !ASensorEventQueue_enableSensor(queue, sensor)) {
+    int ident = ALooper_pollAll(kTimeoutMilliSecs, NULL, NULL, NULL);
+    if (ident == kLooperId) {
+      ASensorEvent data;
+      if (ASensorEventQueue_getEvents(queue, &data, 1)) {
+        ALOGI("Acceleration: x = %f, y = %f, z = %f", data.acceleration.x, data.acceleration.y, data.acceleration.z);
+      }
+    }
+  }
 
   float dt = 1e-2;
   //ALOGI("before launch kernel substep");
@@ -497,7 +537,7 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
   floor_bound_kernel->launch(&host_ctx);
-  ALOGI("launch kernel floor_bound");
+  //ALOGI("launch kernel floor_bound");
   // Make sure to sync the GPU memory so we can read the latest update from CPU
   // And read the 'x' calculated on GPU to our local variable
   // @TODO: Skip this with support of NdArray as we will be able to specify 'dalloc_circles'
