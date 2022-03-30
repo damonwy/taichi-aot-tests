@@ -41,7 +41,7 @@ def compute_indices_shape():
 
 
 # Taichi fields
-ox = ti.Vector.field(args.dim, dtype=ti.f32, shape=n_verts)
+# ox = ti.Vector.field(args.dim, dtype=ti.f32, shape=n_verts)
 
 mod = ti.field(dtype=ti.f32, shape=n_verts)
 
@@ -69,7 +69,7 @@ def set_element(e, I, verts):
 
 
 @ti.kernel
-def get_vertices():
+def get_vertices(ox: ti.any_arr()):
     '''
     This kernel partitions the cube into tetrahedrons.
     Each unit cube is divided into 5 tetrahedrons.
@@ -344,7 +344,7 @@ def advect(x: ti.any_arr(), v: ti.any_arr(), f: ti.any_arr()):
 
 
 @ti.kernel
-def init(x: ti.any_arr(), v: ti.any_arr(), f: ti.any_arr()):
+def init(x: ti.any_arr(), v: ti.any_arr(), f: ti.any_arr(), ox: ti.any_arr()):
     for u in x:
         # x[u] = ox[0]
         # x[u] = [1.0, 1.0, 0.1]
@@ -433,9 +433,9 @@ def substep(x, b, v, r0, p0, mul_ans, f, alpha_scalar, beta_scalar):
     floor_bound(x, v)
 
 
-def run_sim(x, b, r0, p0, v, mul_ans, f, alpha_scalar, beta_scalar):
-    get_vertices()
-    init(x, v, f)
+def run_sim(x, b, r0, p0, v, mul_ans, f, alpha_scalar, beta_scalar, ox):
+    get_vertices(ox)
+    init(x, v, f, ox)
     print('ox', ox.to_numpy().shape, ox.to_numpy())
     print('pos', x.to_numpy().shape, x.to_numpy())
     get_indices(x)
@@ -469,12 +469,12 @@ def run_sim(x, b, r0, p0, v, mul_ans, f, alpha_scalar, beta_scalar):
         frame += 1
 
 
-def run_aot_shared(m, x, v, f):
-    m.add_kernel(get_vertices)
-    m.add_kernel(init, (x, v, f))
+def run_aot_shared(m, x, v, f, ox):
+    m.add_kernel(get_vertices,(ox, ))
+    m.add_kernel(init, (x, v, f, ox))
     m.add_kernel(get_indices, (x, ))
     m.add_kernel(floor_bound, (x, v))
-    m.add_field('ox', ox)
+    # m.add_field('ox', ox)
     m.add_field('mod', mod)
     m.add_field('vertices', vertices)
     m.add_field('B', B)
@@ -503,14 +503,14 @@ def run_aot_implicit(m, x, b, r0, p0, v, mul_ans, f, alpha_scalar, beta_scalar):
     m.add_kernel(add_hack, (v, v, alpha_scalar, p0))
 
 
-def run_aot(x, b, r0, p0, v, mul_ans, f, alpha_scalar, beta_scalar):
+def run_aot(x, b, r0, p0, v, mul_ans, f, alpha_scalar, beta_scalar, ox):
     dir_name = args.exp + '_fem'
     shutil.rmtree(dir_name, ignore_errors=True)
     pathlib.Path(dir_name).mkdir(parents=True, exist_ok=False)
 
     mod = ti.aot.Module(ti.metal)
 
-    run_aot_shared(mod, x, v, f)
+    run_aot_shared(mod, x, v, f, ox)
     if args.exp == 'explicit':
         run_aot_explicit(mod, x, v, f)
     else:
@@ -524,6 +524,7 @@ if __name__ == '__main__':
     x = ti.Vector.ndarray(args.dim, dtype=ti.f32, shape=n_verts)
     v = ti.Vector.ndarray(args.dim, dtype=ti.f32, shape=n_verts)
     mul_ans = ti.Vector.ndarray(args.dim, dtype=ti.f32, shape=n_verts)
+    ox = ti.Vector.ndarray(args.dim, dtype=ti.f32, shape=n_verts)
 
     b = ti.Vector.ndarray(3, dtype=ti.f32, shape=n_verts)
     r0 = ti.Vector.ndarray(3, dtype=ti.f32, shape=n_verts)
@@ -535,6 +536,6 @@ if __name__ == '__main__':
     beta_scalar = ti.ndarray(ti.f32, shape=())
 
     if args.aot:
-        run_aot(x, b, r0, p0, v, mul_ans, f, alpha_scalar, beta_scalar)
+        run_aot(x, b, r0, p0, v, mul_ans, f, alpha_scalar, beta_scalar, ox)
     else:
-        run_sim(x, b, r0, p0, v, mul_ans, f, alpha_scalar, beta_scalar)
+        run_sim(x, b, r0, p0, v, mul_ans, f, alpha_scalar, beta_scalar, ox)

@@ -98,16 +98,17 @@ taichi::lang::DeviceAllocation dalloc_r0;
 taichi::lang::DeviceAllocation dalloc_p0;
 taichi::lang::DeviceAllocation dalloc_alpha;
 taichi::lang::DeviceAllocation dalloc_beta;
+taichi::lang::DeviceAllocation dalloc_ox;
 //taichi::ui::CirclesInfo circles;
 taichi::ui::RenderableInfo r_info;
 taichi::lang::RuntimeContext host_ctx;
 std::unique_ptr<taichi::ui::SceneBase> scene;
 taichi::ui::ParticlesInfo p_info;
 taichi::ui::Camera camera;
+ANativeWindow *native_window;
 
 const int kNumEvents = 1;
-const int kTimeoutMilliSecs = 1000;
-const int kWaitTimeSecs = 1;
+const int kTimeoutMilliSecs = 100;
 const int kLooperId = 1;
 ASensorManager* sensor_manager;
 
@@ -139,7 +140,7 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   }
 
   sensor = ASensorManager_getDefaultSensor(sensor_manager, ASENSOR_TYPE_ACCELEROMETER);
-  ANativeWindow *native_window = ANativeWindow_fromSurface(env, surface);
+  native_window = ANativeWindow_fromSurface(env, surface);
 
   // Initialize our Vulkan Program pipeline
   taichi::uint64 *result_buffer{nullptr};
@@ -229,6 +230,7 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   dalloc_mul_ans = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
   dalloc_r0 = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
   dalloc_p0 = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
+  dalloc_ox = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
 
   alloc_params.size = sizeof(float);
   dalloc_alpha = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
@@ -266,22 +268,21 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   renderer->set_background_color({0.6, 0.6, 0.6});
 
 
+  // get_vertices(ox)
+  set_ctx_arg_devalloc(host_ctx, 0, dalloc_ox);
+  get_vertices_kernel->launch(&host_ctx);
+
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
   set_ctx_arg_devalloc(host_ctx, 2, dalloc_f);
-
-  // get_vertices()
-  get_vertices_kernel->launch(&host_ctx);
-  // init(x, v, f)
+  set_ctx_arg_devalloc(host_ctx, 3, dalloc_ox);
+  // init(x, v, f, ox)
   init_kernel->launch(&host_ctx);
   // get_indices(x)
   get_indices_kernel->launch(&host_ctx);
 
   vulkan_runtime->synchronize();
   ALOGI("launch kernel init");
-
-  // Clear the background
-  //renderer->set_background_color({0.6, 0.6, 0.6});
 
 #if 0
   // Sanity check to make sure the shaders are running properly, we should have
@@ -342,6 +343,8 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
 
         ALOGI("Acceleration: g_x = %f, g_y = %f, g_z = %f", data.acceleration.x, data.acceleration.y, data.acceleration.z);
         g_x = 0.;
+        //g_y = -9.8;
+        //g_z = 0.;
         g_y = data.acceleration.y > 2 || data.acceleration.y < -2 ? -data.acceleration.y : 0;
         g_z = data.acceleration.x > 2 || data.acceleration.x < -2 ? data.acceleration.x * 5 : 0;
       }
@@ -401,13 +404,6 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
 
   // init_r_2()
   init_r_2_kernel->launch(&host_ctx);
-  //// r_2 = dot(r0, r0)
-  //set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
-  //set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
-  //dot_kernel->launch(&host_ctx);
-  //vulkan_runtime->synchronize();
-  //float r_2 = host_ctx.get_ret<float>(0);
-  //ALOGI("r_2: %f", r_2);
 
   int n_iter = 8;
   //float epsilon = 1e-6;
@@ -463,69 +459,6 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
     set_ctx_arg_devalloc(host_ctx, 4, dalloc_p0);
     add_hack_kernel->launch(&host_ctx);
 
-    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
-    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_mul_ans);
-    //// alpha = r_2_new / dot(p0, mul_ans)
-    //dot_kernel->launch(&host_ctx);
-    //vulkan_runtime->synchronize();
-
-    //float temp = host_ctx.get_ret<float>(0);
-    //ALOGI("dot return: %f", temp);
-    //float alpha = r_2_new / temp;
-    //ALOGI("alpha: %f", alpha);
-
-    // OLD:add(v, v, alpha, p0)
-    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_v);
-    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
-    //set_ctx_arg_float(host_ctx, 2, alpha);
-    //set_ctx_arg_devalloc(host_ctx, 3, dalloc_p0);
-    //add_kernel->launch(&host_ctx);
-    //vulkan_runtime->synchronize();
-
-    //// OLD:add(r0, r0, -alpha, mul_ans)
-    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
-    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
-    //set_ctx_arg_float(host_ctx, 2, -alpha);
-    //set_ctx_arg_devalloc(host_ctx, 3, dalloc_mul_ans);
-    //add_kernel->launch(&host_ctx);
-    //vulkan_runtime->synchronize();
-
-    //// add_ndarray(v, p0, alpha)
-    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_v);
-    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_p0);
-    //set_ctx_arg_float(host_ctx, 2, alpha);
-    //add_ndarray_kernel->launch(&host_ctx);
-
-    //// add_ndarray(r0, mul_ans, -alpha)
-    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
-    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_mul_ans);
-    //set_ctx_arg_float(host_ctx, 2, -alpha);
-    //add_ndarray_kernel->launch(&host_ctx);
-
-    //r_2 = r_2_new;
-
-    //// r_2_new = dot(r0, r0);
-    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_r0);
-    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
-    //dot_kernel->launch(&host_ctx);
-    //vulkan_runtime->synchronize();
-    //r_2_new = host_ctx.get_ret<float>(0);
-
-    //ALOGI("r_2_new: %f", r_2_new);
-
-    //// if r_2_new <= r_2_init * epsilon ** 2: break
-    //if (r_2_new <= r_2_init * epsilon * epsilon) {break;}
-
-    //float beta = r_2_new / r_2;
-
-    //ALOGI("beta: %f", beta);
-    //// add(p0, r0, beta, p0)
-    //set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
-    //set_ctx_arg_devalloc(host_ctx, 1, dalloc_r0);
-    //set_ctx_arg_float(host_ctx, 2, beta);
-    //set_ctx_arg_devalloc(host_ctx, 3, dalloc_p0);
-    //add_kernel->launch(&host_ctx);
-    //vulkan_runtime->synchronize();
   }
   // fill_ndarray(f, 0)
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_f);
@@ -537,13 +470,8 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_circles);
   set_ctx_arg_float(host_ctx, 2, dt);
   set_ctx_arg_devalloc(host_ctx, 3, dalloc_v);
+  // FIXME
   add_kernel->launch(&host_ctx);
-  /*
-  set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
-  set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
-  set_ctx_arg_float(host_ctx, 2, dt);
-  add_ndarray_kernel->launch(&host_ctx);
-  */
 #endif
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_v);
