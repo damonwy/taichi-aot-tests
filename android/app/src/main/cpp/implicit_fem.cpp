@@ -3,8 +3,6 @@
 #include <android/log.h>
 #include <android/looper.h>
 #include <android/native_window_jni.h>
-#include <android/sensor.h>
-//#include <hardware/sensors.h>
 #include <jni.h>
 
 #include <taichi/backends/vulkan/vulkan_program.h>
@@ -18,6 +16,7 @@
 #include <map>
 #include <stdint.h>
 #include <vector>
+#include <chrono>
 
 // Uncomment this line to show explicit fem deomo
 //#define USE_EXPLICIT
@@ -79,7 +78,6 @@ taichi::lang::aot::Kernel* fill_ndarray_kernel;
 taichi::lang::aot::Kernel* add_ndarray_kernel;
 taichi::lang::aot::Kernel* dot_kernel;
 taichi::lang::aot::Kernel* add_kernel;
-taichi::lang::aot::Kernel* debug_kernel;
 taichi::lang::aot::Kernel* update_alpha_kernel;
 taichi::lang::aot::Kernel* update_beta_r_2_kernel;
 taichi::lang::aot::Kernel* add_hack_kernel;
@@ -107,39 +105,11 @@ taichi::ui::ParticlesInfo p_info;
 taichi::ui::Camera camera;
 ANativeWindow *native_window;
 
-const int kNumEvents = 1;
-const int kTimeoutMilliSecs = 100;
-const int kLooperId = 1;
-ASensorManager* sensor_manager;
-
-ASensorEventQueue* queue;
-const ASensor* sensor;
-
 extern "C" JNIEXPORT void JNICALL
 Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
                                                         jclass,
                                                         jobject assets,
                                                         jobject surface) {
-  // Sensor
-  sensor_manager = ASensorManager_getInstanceForPackage("naboo");
-  if (!sensor_manager){
-      ALOGI("WRONG");
-      return;
-  }
-  ASensorList sensor_list;
-  int sensor_count = ASensorManager_getSensorList(sensor_manager, &sensor_list);
-  ALOGI("Found %d sensors", sensor_count);
-  for (int i = 0; i < sensor_count; i++) {
-    // Uncomment line below to show sensors on your device.
-    //ALOGI("Found %s", ASensor_getName(sensor_list[i]));
-  }
-  queue = ASensorManager_createEventQueue(sensor_manager, ALooper_prepare(ALOOPER_PREPARE_ALLOW_NON_CALLBACKS), 1, NULL, NULL);
-  if (!queue){
-    ALOGI("INVALID QUEUE");
-    return;
-  }
-
-  sensor = ASensorManager_getDefaultSensor(sensor_manager, ASENSOR_TYPE_ACCELEROMETER);
   native_window = ANativeWindow_fromSurface(env, surface);
 
   // Initialize our Vulkan Program pipeline
@@ -209,7 +179,6 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   dot_kernel = module->get_kernel("dot");
   add_ndarray_kernel = module->get_kernel("add_ndarray");
   fill_ndarray_kernel = module->get_kernel("fill_ndarray");
-  debug_kernel = module->get_kernel("debug");
   init_r_2_kernel = module->get_kernel("init_r_2");
   update_alpha_kernel = module->get_kernel("update_alpha");
   update_beta_r_2_kernel = module->get_kernel("update_beta_r_2");
@@ -250,11 +219,6 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   f_info.snode        = nullptr;
   f_info.dev_alloc    = dalloc_circles;
 
-  //circles.renderable_info.has_per_vertex_color = false;
-  //circles.renderable_info.vbo_attrs = taichi::ui::VertexAttributes::kPos;
-  //circles.renderable_info.vbo                  = f_info;
-  //circles.color                                = {0.8, 0.4, 0.1};
-  //circles.radius                               = 0.002f;
   r_info.vbo = f_info;
   r_info.has_per_vertex_color = false;
   r_info.vbo_attrs = taichi::ui::VertexAttributes::kPos;
@@ -327,32 +291,15 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_resize(JNIEnv *,
 extern "C" JNIEXPORT void JNICALL
 Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
                                                           jclass,
-                                                          jobject surface) {
+                                                          jobject surface,
+                                                          float g_x,
+                                                          float g_y,
+                                                          float g_z
+                                                          ) {
   // timer starts before launch kernel
   auto start = std::chrono  ::steady_clock::now();
-  float g_x, g_y, g_z;
-
-  if (sensor && !ASensorEventQueue_enableSensor(queue, sensor)) {
-    int ident = ALooper_pollAll(kTimeoutMilliSecs, NULL, NULL, NULL);
-    if (ident == kLooperId) {
-      ASensorEvent data;
-      if (ASensorEventQueue_getEvents(queue, &data, 1)) {
-        //g_x = data.acceleration.z;
-        //g_y = data.acceleration.y;
-        //g_z = data.acceleration.x;
-
-        ALOGI("Acceleration: g_x = %f, g_y = %f, g_z = %f", data.acceleration.x, data.acceleration.y, data.acceleration.z);
-        g_x = 0.;
-        //g_y = -9.8;
-        //g_z = 0.;
-        g_y = data.acceleration.y > 2 || data.acceleration.y < -2 ? -data.acceleration.y : 0;
-        g_z = data.acceleration.x > 2 || data.acceleration.x < -2 ? data.acceleration.x * 5 : 0;
-      }
-    }
-  }
 
   float dt = 1e-2;
-  //ALOGI("before launch kernel substep");
 #ifdef USE_EXPLICIT
   // Run 'substep' 40 times
   for (int i = 0; i < 40; i++) {
@@ -368,11 +315,15 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   }
 #else
   // get_force(x, f)
+  ALOGI("Acceleration: g_x = %f, g_y = %f, g_z = %f", g_x, g_y, g_z);
+  float a_x = g_z;
+  float a_y = g_y > 2 || g_y < -2 ? -g_y : 0;
+  float a_z = g_x > 2 || g_x < -2 ? g_x * 4 : 0;
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_f);
-  set_ctx_arg_float(host_ctx, 2, g_x);
-  set_ctx_arg_float(host_ctx, 3, g_y);
-  set_ctx_arg_float(host_ctx, 4, g_z);
+  set_ctx_arg_float(host_ctx, 2, a_x);
+  set_ctx_arg_float(host_ctx, 3, a_y);
+  set_ctx_arg_float(host_ctx, 4, a_z);
   get_force_kernel->launch(&host_ctx);
   // get_b(v, b, f)
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_v);
@@ -406,22 +357,12 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   init_r_2_kernel->launch(&host_ctx);
 
   int n_iter = 8;
-  //float epsilon = 1e-6;
-  //float r_2_init = r_2;
-  //float r_2_new = r_2;
 
   for (int i = 0; i < n_iter; ++i) {
     // matmul_cell(p0, mul_ans)
     set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
     set_ctx_arg_devalloc(host_ctx, 1, dalloc_mul_ans);
     matmul_cell_kernel->launch(&host_ctx);
-    //vulkan_runtime->synchronize();
-
-    //// FIXME: For debug only
-    //debug_kernel->launch(&host_ctx);
-    //vulkan_runtime->synchronize();
-    //float ddd = host_ctx.get_ret<float>(0);
-    //ALOGI("ddd: %f", ddd);
 
     set_ctx_arg_devalloc(host_ctx, 0, dalloc_p0);
     set_ctx_arg_devalloc(host_ctx, 1, dalloc_mul_ans);
@@ -470,7 +411,6 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   set_ctx_arg_devalloc(host_ctx, 1, dalloc_circles);
   set_ctx_arg_float(host_ctx, 2, dt);
   set_ctx_arg_devalloc(host_ctx, 3, dalloc_v);
-  // FIXME
   add_kernel->launch(&host_ctx);
 #endif
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_circles);
@@ -489,7 +429,6 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   //ALOGI("Execution time is %" PRId64 "ns\n", cpu_time);
 
   // Render the UI
-  //renderer->circles(circles);
   scene->set_camera(camera);
   scene->particles(p_info);
   scene->ambient_light({1.0, 1.0, 1.0});

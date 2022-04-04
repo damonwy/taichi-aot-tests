@@ -29,12 +29,14 @@ import androidx.annotation.NonNull;
 public class VKSurfaceView extends SurfaceView implements SurfaceHolder.Callback2 {
     private static final String TAG = "VKSurfaceView";
     private RendererThread mRendererThread;
+    private AccelerationSensor sensor;
 
     public VKSurfaceView(Context context) {
         super(context);
 
         SurfaceHolder holder = getHolder();
         holder.addCallback(this);
+        sensor = new AccelerationSensor(context);
     }
 
     // @TODO: Define a Renderer Class instead of calling the NativeLib directly like the GLSurfaceView
@@ -177,7 +179,7 @@ public class VKSurfaceView extends SurfaceView implements SurfaceHolder.Callback
                 }
 
                 if ((w > 0) && (h > 0)) {
-                    NativeLib.render(mHolder.getSurface());
+                    NativeLib.render(mHolder.getSurface(), sensor.gravity[0], sensor.gravity[1], sensor.gravity[2]);
                 }
             }
         }
@@ -274,5 +276,5 @@ class NativeLib {
     public static native void pause(Surface surface);
     public static native void resume(Surface surface);
     public static native void resize(Surface surface, int width, int height);
-    public static native void render(Surface surface);
+    public static native void render(Surface surface, float g_x, float g_y, float g_z);
 }
