@@ -131,11 +131,15 @@ int main() {
     auto get_matrix_kernel = module->get_kernel("get_matrix");
     auto matmul_edge_kernel = module->get_kernel("matmul_edge");
     auto add_kernel = module->get_kernel("add");
-    auto dot_kernel = module->get_kernel("dot");
+    auto add_hack_kernel = module->get_kernel("add_hack");
+    auto dot2scalar_kernel = module->get_kernel("dot2scalar");
     auto get_b_kernel = module->get_kernel("get_b");
     auto ndarray_to_ndarray_kernel = module->get_kernel("ndarray_to_ndarray");
     auto fill_ndarray_kernel = module->get_kernel("fill_ndarray");
     auto clear_field_kernel = module->get_kernel("clear_field");
+    auto init_r_2_kernel = module->get_kernel("init_r_2");
+    auto update_alpha_kernel = module->get_kernel("update_alpha");
+    auto update_beta_r_2_kernel = module->get_kernel("update_beta_r_2");
     
     /*
     auto init_kernel = module->get_kernel("init");
@@ -186,6 +190,9 @@ int main() {
     // ox
     alloc_params.size = N_VERTS * 3 * sizeof(float);
     taichi::lang::DeviceAllocation devalloc_ox = vulkan_runtime.get_ti_device()->allocate_memory(alloc_params);
+    alloc_params.size = sizeof(float);
+    taichi::lang::DeviceAllocation devalloc_alpha_scalar = vulkan_runtime.get_ti_device()->allocate_memory(alloc_params);
+    taichi::lang::DeviceAllocation devalloc_beta_scalar = vulkan_runtime.get_ti_device()->allocate_memory(alloc_params);
 
     {
         char *const device_arr_ptr = reinterpret_cast<char *>(vulkan_runtime.get_ti_device()->map(devalloc_indices));
@@ -319,16 +326,14 @@ int main() {
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_p0, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_r0, N_VERTS, 3, 1);
             ndarray_to_ndarray_kernel->launch(&host_ctx);
-            // r_2 = dot(r0, r0)
+            // dot2scalar(r0, r0)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_r0, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_r0, N_VERTS, 3, 1);
-            dot_kernel->launch(&host_ctx);
-            float r_2 = host_ctx.get_ret<float>(0);
+            dot2scalar_kernel->launch(&host_ctx);
+            // init_r_2()
+            init_r_2_kernel->launch(&host_ctx);
 
             int n_iter = 10;
-            float epsilon = 1e-6;
-            float r_2_init = r_2;
-            float r_2_new = r_2;
 
             for (int i = 0; i < n_iter; i++) {
                 // matmul_edge(mul_ans, p0, edges);
@@ -336,42 +341,43 @@ int main() {
                 set_ctx_arg_devalloc(host_ctx, 1, devalloc_p0, N_VERTS, 3, 1);
                 set_ctx_arg_devalloc(host_ctx, 2, devalloc_edges, N_EDGES, 2, 1);
                 matmul_edge_kernel->launch(&host_ctx);
-                // alpha = r_2_new / dot(p0, mul_ans)
+                // dot2scalar(p0, mul_ans)
                 set_ctx_arg_devalloc(host_ctx, 0, devalloc_p0, N_VERTS, 3, 1);
                 set_ctx_arg_devalloc(host_ctx, 1, devalloc_mul_ans, N_VERTS, 3, 1);
-                dot_kernel->launch(&host_ctx);
-                vulkan_runtime.synchronize();
-                float alpha = r_2_new / host_ctx.get_ret<float>(0);
+                dot2scalar_kernel->launch(&host_ctx);
+                set_ctx_arg_devalloc(host_ctx, 0, devalloc_alpha_scalar, 1, 1, 1);
+                update_alpha_kernel->launch(&host_ctx);
           		// add(v, v, alpha, p0)
           		set_ctx_arg_devalloc(host_ctx, 0, devalloc_v, N_VERTS, 3, 1);
           		set_ctx_arg_devalloc(host_ctx, 1, devalloc_v, N_VERTS, 3, 1);
-          		set_ctx_arg_float(host_ctx, 2, alpha);
-          		set_ctx_arg_devalloc(host_ctx, 3, devalloc_p0, N_VERTS, 3, 1);
-          		add_kernel->launch(&host_ctx);
+          		set_ctx_arg_float(host_ctx, 2, 1.0f);
+                set_ctx_arg_devalloc(host_ctx, 3, devalloc_alpha_scalar, 1, 1, 1);
+          		set_ctx_arg_devalloc(host_ctx, 4, devalloc_p0, N_VERTS, 3, 1);
+          		add_hack_kernel->launch(&host_ctx);
 			    // add(r0, r0, -alpha, mul_ans)
                 set_ctx_arg_devalloc(host_ctx, 0, devalloc_r0, N_VERTS, 3, 1);
                 set_ctx_arg_devalloc(host_ctx, 1, devalloc_r0, N_VERTS, 3, 1);
-                set_ctx_arg_float(host_ctx, 2, -alpha);
-                set_ctx_arg_devalloc(host_ctx, 3, devalloc_mul_ans, N_VERTS, 3, 1);
-                add_kernel->launch(&host_ctx);
+                set_ctx_arg_float(host_ctx, 2, -1.0f);
+                set_ctx_arg_devalloc(host_ctx, 3, devalloc_alpha_scalar, 1, 1, 1);
+                set_ctx_arg_devalloc(host_ctx, 4, devalloc_mul_ans, N_VERTS, 3, 1);
+                add_hack_kernel->launch(&host_ctx);
 
-                r_2 = r_2_new;
                 // r_2_new = dot(r0, r0)
                 set_ctx_arg_devalloc(host_ctx, 0, devalloc_r0, N_VERTS, 3, 1);
                 set_ctx_arg_devalloc(host_ctx, 1, devalloc_r0, N_VERTS, 3, 1);
-                dot_kernel->launch(&host_ctx);
-                vulkan_runtime.synchronize();
-                r_2_new = host_ctx.get_ret<float>(0);
+                dot2scalar_kernel->launch(&host_ctx);
 
-                if (r_2_new <= r_2_init * epsilon * epsilon) {break;}
-                float beta = r_2_new / r_2;
+                set_ctx_arg_devalloc(host_ctx, 0, devalloc_beta_scalar, 1, 1, 1);
+                update_beta_r_2_kernel->launch(&host_ctx);
+
 
                 // add(p0, r0, beta, p0)
                 set_ctx_arg_devalloc(host_ctx, 0, devalloc_p0, N_VERTS, 3, 1);
                 set_ctx_arg_devalloc(host_ctx, 1, devalloc_r0, N_VERTS, 3, 1);
-                set_ctx_arg_float(host_ctx, 2, beta);
-                set_ctx_arg_devalloc(host_ctx, 3, devalloc_p0, N_VERTS, 3, 1);
-                add_kernel->launch(&host_ctx);
+                set_ctx_arg_float(host_ctx, 2, 1.0f);
+                set_ctx_arg_devalloc(host_ctx, 3, devalloc_beta_scalar, 1, 1, 1);
+                set_ctx_arg_devalloc(host_ctx, 4, devalloc_p0, N_VERTS, 3, 1);
+                add_hack_kernel->launch(&host_ctx);
             }
             
             // fill_ndarray(f, 0)
