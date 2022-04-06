@@ -26,7 +26,7 @@
   ((void)__android_log_print(ANDROID_LOG_ERROR, "TaichiTest", "%s: " fmt, \
                              __FUNCTION__, ##__VA_ARGS__))
 
-#define ONLY_INIT
+//#define ONLY_INIT
 
 void set_ctx_arg_devalloc(taichi::lang::RuntimeContext &host_ctx, int arg_id, taichi::lang::DeviceAllocation& alloc, int x, int y, int z) {
   host_ctx.set_arg(arg_id, &alloc);
@@ -55,11 +55,11 @@ void unmap(taichi::lang::vulkan::VkRuntime &vulkan_runtime, taichi::lang::Device
 void print_debug(taichi::lang::vulkan::VkRuntime *vulkan_runtime, taichi::lang::DeviceAllocation &alloc, int it, bool use_int = false) {
     vulkan_runtime->synchronize();
     auto ptr = map(*vulkan_runtime, alloc);
-    if (!use_int) ALOGI("%d %.10f %.10f %.10f\n", it, ptr[0], ptr[1], ptr[2]);
+    if (!use_int) ALOGI("%d %.10f %.10f %.10f %.10f\n", it, ptr[0], ptr[1], ptr[2], ptr[1812]);
     else
     {
         auto p = reinterpret_cast<int*>(ptr);
-        ALOGI("%d %d %d %d\n", it, p[0], p[1], p[2]);
+        ALOGI("%d %d %d %d %d\n", it, p[0], p[1], p[2], p[1812]);
     }
     unmap(*vulkan_runtime, alloc);
 }
@@ -114,6 +114,7 @@ taichi::ui::RenderableInfo r_info;
 taichi::ui::MeshInfo m_info;
 std::unique_ptr<taichi::ui::SceneBase> scene;
 taichi::ui::Camera camera;
+taichi::ui::ParticlesInfo p_info;
 
 ANativeWindow *native_window;
 
@@ -201,6 +202,12 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   // Allocate memory for Circles position
   taichi::lang::Device::AllocParams alloc_params;
   alloc_params.host_write = true;
+  // indices
+  alloc_params.usage = taichi::lang::AllocUsage::Index;
+  alloc_params.size = N_FACES * 3 * sizeof(int);
+  dalloc_indices = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
+
+  alloc_params.usage = taichi::lang::AllocUsage::Storage;
   // x
   alloc_params.size = N_VERTS * 3 * sizeof(float);
   dalloc_x = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
@@ -217,10 +224,6 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   dalloc_r0 = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
   dalloc_p0 = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
 
-  // indices
-  alloc_params.size = N_FACES * 3 * sizeof(int);
-  dalloc_indices = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
-
   // vertices
   alloc_params.size = N_CELLS * 4 * sizeof(int);
   dalloc_vertices = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
@@ -235,6 +238,8 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
 
   {
       char *const device_arr_ptr = reinterpret_cast<char *>(vulkan_runtime->get_ti_device()->map(dalloc_indices));
+      //std::cout << "indices " << (uint64_t) device_arr_ptr << std::endl;
+      ALOGI("indices %llu", (uint64_t) device_arr_ptr);
       std::memcpy(device_arr_ptr, (void *)indices_data, sizeof(indices_data));
       vulkan_runtime->get_ti_device()->unmap(dalloc_indices);
   }
@@ -259,6 +264,9 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
       vulkan_runtime->get_ti_device()->unmap(dalloc_edges);
   }
 
+  // FIXME
+  print_debug(vulkan_runtime.get(), dalloc_x, 0);
+  print_debug(vulkan_runtime.get(), dalloc_indices, 1, true);
   //alloc_params.size = sizeof(float);
   //dalloc_alpha = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
   //dalloc_beta = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
@@ -271,6 +279,9 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   set_ctx_arg_devalloc(host_ctx, 3, dalloc_ox, N_VERTS, 3, 1);
   set_ctx_arg_devalloc(host_ctx, 4, dalloc_vertices, N_CELLS, 4, 1);
   init_kernel->launch(&host_ctx);
+
+  // FIXME
+  print_debug(vulkan_runtime.get(), dalloc_x, 0);
 
   // get_matrix(c2e, vertices)
   set_ctx_arg_devalloc(host_ctx, 0, dalloc_c2e, N_CELLS, 6, 1);
@@ -302,12 +313,16 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
 
   r_info.vbo = f_info;
   r_info.has_per_vertex_color = false;
-  r_info.indices = i_info;
+  //r_info.indices = i_info;
   r_info.vbo_attrs = taichi::ui::VertexAttributes::kPos;
 
-  m_info.renderable_info = r_info;
-  m_info.color = {0.73, 0.33, 0.23};
-  m_info.two_sided = false;
+  p_info.renderable_info = r_info;
+  p_info.color = {1.0, 1.0, 1.0};
+  p_info.radius = 0.008;
+
+  //m_info.renderable_info = r_info;
+  //m_info.color = {0.73, 0.33, 0.23};
+  //m_info.two_sided = false;
 
   camera.position = {0, 1.5, 2.95};
   camera.lookat = {0, 0, 0};
@@ -374,7 +389,7 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   auto start = std::chrono  ::steady_clock::now();
 
   float dt = 2.5e-3;
-#if 0
+#if 1
   for (int i = 0; i < 4; i++) {
       // get_force(x, f, vertices)
       set_ctx_arg_devalloc(host_ctx, 0, dalloc_x, N_VERTS, 3, 1);
@@ -490,6 +505,9 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
   print_debug(vulkan_runtime.get(), dalloc_indices, 1, true);
 #endif
 
+  // FIXME
+  print_debug(vulkan_runtime.get(), dalloc_x, 0);
+  print_debug(vulkan_runtime.get(), dalloc_indices, 1, true);
   // timer ends after synchronization
   auto end = std::chrono::steady_clock::now();
   auto cpu_time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
@@ -497,7 +515,8 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
 
   // Render elements
   scene->set_camera(camera);
-  scene->mesh(m_info);
+  scene->particles(p_info);
+  //scene->mesh(m_info);
   scene->ambient_light({0.1f, 0.1f, 0.1f});
   scene->point_light({.5f, 10.0f, 0.5f}, {0.5f, 0.5f, 0.5f});
   scene->point_light({10.0f, 10.0f, 10.0f}, {0.5f, 0.5f, 0.5f});
