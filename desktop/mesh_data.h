@@ -289,7 +289,6 @@ void run_init(int width, int height, std::string path_prefix, taichi::ui::Taichi
 
 
 void run_render_loop() {
-           // Run 'substep' 40 times
         for (int i = 0; i < 4; i++) {
             // get_force(x, f, vertices)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_x, N_VERTS, 3, 1);
