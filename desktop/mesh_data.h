@@ -124,7 +124,7 @@ void run_init(int width, int height, std::string path_prefix, taichi::ui::Taichi
     // // Create GUI & renderer
     renderer  = std::make_unique<taichi::ui::vulkan::Renderer>();
     renderer->init(nullptr, window, app_config);    // Create a GGUI configuration
-    
+
     // Initialize our Vulkan Program pipeline
     taichi::uint64 *result_buffer{nullptr};
     memory_pool = std::make_unique<taichi::lang::MemoryPool>(taichi::Arch::vulkan, nullptr);
@@ -233,7 +233,7 @@ void run_init(int width, int height, std::string path_prefix, taichi::ui::Taichi
     // render the renderer)
     gui = std::make_shared<taichi::ui::vulkan::Gui>(&renderer->app_context(), &renderer->swap_chain(), window);
     clear_field_kernel->launch(&host_ctx);
-    
+
     set_ctx_arg_devalloc(host_ctx, 0, devalloc_x, N_VERTS, 3, 1);
     set_ctx_arg_devalloc(host_ctx, 1, devalloc_v, N_VERTS, 3, 1);
     set_ctx_arg_devalloc(host_ctx, 2, devalloc_f, N_VERTS, 3, 1);
@@ -270,12 +270,16 @@ void run_init(int width, int height, std::string path_prefix, taichi::ui::Taichi
 
     r_info.vbo = f_info;
     r_info.has_per_vertex_color = false;
-    r_info.indices = i_info;
+    //r_info.indices = i_info;
     r_info.vbo_attrs = taichi::ui::VertexAttributes::kPos;
 
-    m_info.renderable_info = r_info;
-    m_info.color = glm::vec3(0.73, 0.33, 0.23);
-    m_info.two_sided = false;
+    //m_info.renderable_info = r_info;
+    //m_info.color = glm::vec3(0.73, 0.33, 0.23);
+    //m_info.two_sided = false;
+
+    p_info.renderable_info = r_info;
+    p_info.color = {1.0, 1.0, 1.0};
+    p_info.radius = 0.008;
 
     camera.position = glm::vec3(0.0, 1.5, 2.95);
     camera.lookat = glm::vec3(0, 0, 0);
@@ -300,7 +304,7 @@ void run_render_loop() {
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_b, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 2, devalloc_f, N_VERTS, 3, 1);
             get_b_kernel->launch(&host_ctx);
-            
+
             // matmul_edge(mul_ans, v, edges)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_mul_ans, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_v, N_VERTS, 3, 1);
@@ -369,7 +373,7 @@ void run_render_loop() {
                 set_ctx_arg_devalloc(host_ctx, 4, devalloc_p0, N_VERTS, 3, 1);
                 add_hack_kernel->launch(&host_ctx);
             }
-            
+
             // fill_ndarray(f, 0)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_f, N_VERTS, 3, 1);
             set_ctx_arg_float(host_ctx, 1, 0);
@@ -398,7 +402,8 @@ void run_render_loop() {
 #endif
         // Render elements
         scene->set_camera(camera);
-        scene->mesh(m_info);
+        //scene->mesh(m_info);
+        scene->particles(p_info);
         scene->ambient_light(glm::vec3(0.1f, 0.1f, 0.1f));
         scene->point_light(glm::vec3(0.5f, 10.0f, 0.5f), glm::vec3(0.5f, 0.5f, 0.5f));
         scene->point_light(glm::vec3(10.0f, 10.0f, 10.0f), glm::vec3(0.5f, 0.5f, 0.5f));
