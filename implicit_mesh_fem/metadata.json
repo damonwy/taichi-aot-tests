@@ -127,11 +127,17 @@
                 "type": 0,
                 "id": 0},
               "binding": 2}]}],
-      "args_count": 3,
+      "args_count": 6,
       "rets_count": 0,
-      "args_buffer_size": 24,
+      "args_buffer_size": 36,
       "rets_buffer_size": 0,
-      "scalar_args": {},
+      "scalar_args": {"5": {
+          "dtype_name": "f32",
+          "offset_in_args_buf": 32},"3": {
+          "dtype_name": "f32",
+          "offset_in_args_buf": 24},"4": {
+          "dtype_name": "f32",
+          "offset_in_args_buf": 28}},
       "arr_args": {"2": {
           "dtype_name": "i32",
           "field_dim": 1,

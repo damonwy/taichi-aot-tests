@@ -298,6 +298,9 @@ void run_render_loop() {
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_x, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_f, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 2, devalloc_vertices, N_CELLS, 4, 1);
+            set_ctx_arg_float(host_ctx, 3, -3);
+            set_ctx_arg_float(host_ctx, 4, -9.8);
+            set_ctx_arg_float(host_ctx, 5, 0);
             get_force_kernel->launch(&host_ctx);
             // get_b(v, b, f)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_v, N_VERTS, 3, 1);
