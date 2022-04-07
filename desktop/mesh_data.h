@@ -22,7 +22,6 @@ int c2e_data[1770][6] = {{1142,1148,1145,1185,1182,2737,},{151,153,156,166,167,2
 void set_ctx_arg_devalloc(taichi::lang::RuntimeContext &host_ctx, int arg_id, taichi::lang::DeviceAllocation& alloc, int x, int y, int z) {
   host_ctx.set_arg(arg_id, &alloc);
   host_ctx.set_device_allocation(arg_id, true);
-  // This is hack since our ndarrays happen to have exactly the same size in implicit_fem demo.
   host_ctx.extra_args[arg_id][0] = x;
   host_ctx.extra_args[arg_id][1] = y;
   host_ctx.extra_args[arg_id][2] = z;
@@ -55,34 +54,45 @@ void print_debug(taichi::lang::vulkan::VkRuntime &vulkan_runtime, taichi::lang::
     unmap(vulkan_runtime, alloc);
 }
 
+void load_data(taichi::lang::vulkan::VkRuntime *vulkan_runtime, taichi::lang::DeviceAllocation& alloc, void *data, size_t size) {
+  char *const device_arr_ptr = reinterpret_cast<char *>(vulkan_runtime->get_ti_device()->map(alloc));
+  std::memcpy(device_arr_ptr, data, size);
+  vulkan_runtime->get_ti_device()->unmap(alloc);
+}
+
+struct ImplicitFemKernels {
+  taichi::lang::aot::Kernel* init_kernel;
+  taichi::lang::aot::Kernel* get_vertices_kernel;
+  taichi::lang::aot::Kernel* get_indices_kernel;
+  taichi::lang::aot::Kernel* get_force_kernel;
+  taichi::lang::aot::Kernel* advect_kernel;
+  taichi::lang::aot::Kernel* floor_bound_kernel;
+  taichi::lang::aot::Kernel* get_b_kernel;
+  taichi::lang::aot::Kernel* matmul_cell_kernel;
+  taichi::lang::aot::Kernel* ndarray_to_ndarray_kernel;
+  taichi::lang::aot::Kernel* fill_ndarray_kernel;
+  taichi::lang::aot::Kernel* add_ndarray_kernel;
+  taichi::lang::aot::Kernel* dot_kernel;
+  taichi::lang::aot::Kernel* add_kernel;
+  taichi::lang::aot::Kernel* update_alpha_kernel;
+  taichi::lang::aot::Kernel* update_beta_r_2_kernel;
+  taichi::lang::aot::Kernel* add_hack_kernel;
+  taichi::lang::aot::Kernel* dot2scalar_kernel;
+  taichi::lang::aot::Kernel* init_r_2_kernel;
+  taichi::lang::aot::Kernel* get_matrix_kernel;
+  taichi::lang::aot::Kernel* clear_field_kernel;
+  taichi::lang::aot::Kernel* matmul_edge_kernel;
+};
+
+// TODO: cleanup these global variables
+ImplicitFemKernels loaded_kernels;
+
 std::unique_ptr<taichi::lang::MemoryPool> memory_pool;
 std::unique_ptr<taichi::lang::vulkan::VkRuntime> vulkan_runtime;
 std::unique_ptr<taichi::lang::aot::Module> module;
 taichi::lang::RuntimeContext host_ctx;
 std::shared_ptr<taichi::ui::vulkan::Gui> gui;
 std::unique_ptr<taichi::ui::vulkan::Renderer> renderer;
-
-taichi::lang::aot::Kernel* init_kernel;
-taichi::lang::aot::Kernel* get_vertices_kernel;
-taichi::lang::aot::Kernel* get_indices_kernel;
-taichi::lang::aot::Kernel* get_force_kernel;
-taichi::lang::aot::Kernel* advect_kernel;
-taichi::lang::aot::Kernel* floor_bound_kernel;
-taichi::lang::aot::Kernel* get_b_kernel;
-taichi::lang::aot::Kernel* matmul_cell_kernel;
-taichi::lang::aot::Kernel* ndarray_to_ndarray_kernel;
-taichi::lang::aot::Kernel* fill_ndarray_kernel;
-taichi::lang::aot::Kernel* add_ndarray_kernel;
-taichi::lang::aot::Kernel* dot_kernel;
-taichi::lang::aot::Kernel* add_kernel;
-taichi::lang::aot::Kernel* update_alpha_kernel;
-taichi::lang::aot::Kernel* update_beta_r_2_kernel;
-taichi::lang::aot::Kernel* add_hack_kernel;
-taichi::lang::aot::Kernel* dot2scalar_kernel;
-taichi::lang::aot::Kernel* init_r_2_kernel;
-taichi::lang::aot::Kernel* get_matrix_kernel;
-taichi::lang::aot::Kernel* clear_field_kernel;
-taichi::lang::aot::Kernel* matmul_edge_kernel;
 
 
 taichi::lang::DeviceAllocation devalloc_x;
@@ -142,21 +152,21 @@ void run_init(int width, int height, std::string path_prefix, taichi::ui::Taichi
     vulkan_runtime->add_root_buffer(root_size);
 
 
-    get_force_kernel = module->get_kernel("get_force");
-    init_kernel = module->get_kernel("init");
-    floor_bound_kernel = module->get_kernel("floor_bound");
-    get_matrix_kernel = module->get_kernel("get_matrix");
-    matmul_edge_kernel = module->get_kernel("matmul_edge");
-    add_kernel = module->get_kernel("add");
-    add_hack_kernel = module->get_kernel("add_hack");
-    dot2scalar_kernel = module->get_kernel("dot2scalar");
-    get_b_kernel = module->get_kernel("get_b");
-    ndarray_to_ndarray_kernel = module->get_kernel("ndarray_to_ndarray");
-    fill_ndarray_kernel = module->get_kernel("fill_ndarray");
-    clear_field_kernel = module->get_kernel("clear_field");
-    init_r_2_kernel = module->get_kernel("init_r_2");
-    update_alpha_kernel = module->get_kernel("update_alpha");
-    update_beta_r_2_kernel = module->get_kernel("update_beta_r_2");
+    loaded_kernels.get_force_kernel = module->get_kernel("get_force");
+    loaded_kernels.init_kernel = module->get_kernel("init");
+    loaded_kernels.floor_bound_kernel = module->get_kernel("floor_bound");
+    loaded_kernels.get_matrix_kernel = module->get_kernel("get_matrix");
+    loaded_kernels.matmul_edge_kernel = module->get_kernel("matmul_edge");
+    loaded_kernels.add_kernel = module->get_kernel("add");
+    loaded_kernels.add_hack_kernel = module->get_kernel("add_hack");
+    loaded_kernels.dot2scalar_kernel = module->get_kernel("dot2scalar");
+    loaded_kernels.get_b_kernel = module->get_kernel("get_b");
+    loaded_kernels.ndarray_to_ndarray_kernel = module->get_kernel("ndarray_to_ndarray");
+    loaded_kernels.fill_ndarray_kernel = module->get_kernel("fill_ndarray");
+    loaded_kernels.clear_field_kernel = module->get_kernel("clear_field");
+    loaded_kernels.init_r_2_kernel = module->get_kernel("init_r_2");
+    loaded_kernels.update_alpha_kernel = module->get_kernel("update_alpha");
+    loaded_kernels.update_beta_r_2_kernel = module->get_kernel("update_beta_r_2");
 
 
     // Prepare Ndarray for model
@@ -198,32 +208,11 @@ void run_init(int width, int height, std::string path_prefix, taichi::ui::Taichi
     devalloc_alpha_scalar = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
     devalloc_beta_scalar = vulkan_runtime->get_ti_device()->allocate_memory(alloc_params);
 
-    {
-        char *const device_arr_ptr = reinterpret_cast<char *>(vulkan_runtime->get_ti_device()->map(devalloc_indices));
-        std::memcpy(device_arr_ptr, (void *)indices_data, sizeof(indices_data));
-        vulkan_runtime->get_ti_device()->unmap(devalloc_indices);
-    }
-    {
-        char *const device_arr_ptr = reinterpret_cast<char *>(vulkan_runtime->get_ti_device()->map(devalloc_c2e));
-        std::memcpy(device_arr_ptr, (void *)c2e_data, sizeof(c2e_data));
-        vulkan_runtime->get_ti_device()->unmap(devalloc_c2e);
-    }
-    {
-        char *const device_arr_ptr = reinterpret_cast<char *>(vulkan_runtime->get_ti_device()->map(devalloc_vertices));
-        std::memcpy(device_arr_ptr, (void *)vertices_data, sizeof(vertices_data));
-        vulkan_runtime->get_ti_device()->unmap(devalloc_vertices);
-    }
-    {
-        char *const device_arr_ptr = reinterpret_cast<char *>(vulkan_runtime->get_ti_device()->map(devalloc_ox));
-        std::memcpy(device_arr_ptr, (void *)ox_data, sizeof(ox_data));
-        vulkan_runtime->get_ti_device()->unmap(devalloc_ox);
-    }
-    {
-        char *const device_arr_ptr = reinterpret_cast<char *>(vulkan_runtime->get_ti_device()->map(devalloc_edges));
-        std::memcpy(device_arr_ptr, (void *)edges_data, sizeof(edges_data));
-        vulkan_runtime->get_ti_device()->unmap(devalloc_edges);
-    }
-
+    load_data(vulkan_runtime.get(), devalloc_indices, indices_data, sizeof(indices_data));
+    load_data(vulkan_runtime.get(), devalloc_c2e, c2e_data, sizeof(c2e_data));
+    load_data(vulkan_runtime.get(), devalloc_vertices, vertices_data, sizeof(vertices_data));
+    load_data(vulkan_runtime.get(), devalloc_ox, ox_data, sizeof(ox_data));
+    load_data(vulkan_runtime.get(), devalloc_edges, edges_data, sizeof(edges_data));
 
     memset(&host_ctx, 0, sizeof(taichi::lang::RuntimeContext));
     host_ctx.result_buffer = result_buffer;
@@ -232,7 +221,7 @@ void run_init(int width, int height, std::string path_prefix, taichi::ui::Taichi
     // Create a GUI even though it's not used in our case (required to
     // render the renderer)
     gui = std::make_shared<taichi::ui::vulkan::Gui>(&renderer->app_context(), &renderer->swap_chain(), window);
-    clear_field_kernel->launch(&host_ctx);
+    loaded_kernels.clear_field_kernel->launch(&host_ctx);
 
     set_ctx_arg_devalloc(host_ctx, 0, devalloc_x, N_VERTS, 3, 1);
     set_ctx_arg_devalloc(host_ctx, 1, devalloc_v, N_VERTS, 3, 1);
@@ -240,14 +229,14 @@ void run_init(int width, int height, std::string path_prefix, taichi::ui::Taichi
     set_ctx_arg_devalloc(host_ctx, 3, devalloc_ox, N_VERTS, 3, 1);
     set_ctx_arg_devalloc(host_ctx, 4, devalloc_vertices, N_CELLS, 4, 1);
     // init(x, v, f, ox, vertices)
-    init_kernel->launch(&host_ctx);
+    loaded_kernels.init_kernel->launch(&host_ctx);
     // get_matrix(c2e, vertices)
     set_ctx_arg_devalloc(host_ctx, 0, devalloc_c2e, N_CELLS, 6, 1);
     set_ctx_arg_devalloc(host_ctx, 1, devalloc_vertices, N_CELLS, 4, 1);
-    get_matrix_kernel->launch(&host_ctx);
+    loaded_kernels.get_matrix_kernel->launch(&host_ctx);
     vulkan_runtime->synchronize();
 
-        // Describe information to render the circle with Vulkan
+    // Describe information to render the circle with Vulkan
     f_info.valid        = true;
     f_info.field_type   = taichi::ui::FieldType::Matrix;
     f_info.matrix_rows  = 3;
@@ -301,34 +290,34 @@ void run_render_loop(float a_x = 0, float a_y = -9.8, float a_z = 0) {
             set_ctx_arg_float(host_ctx, 3, a_x);
             set_ctx_arg_float(host_ctx, 4, a_y);
             set_ctx_arg_float(host_ctx, 5, a_z);
-            get_force_kernel->launch(&host_ctx);
+            loaded_kernels.get_force_kernel->launch(&host_ctx);
             // get_b(v, b, f)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_v, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_b, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 2, devalloc_f, N_VERTS, 3, 1);
-            get_b_kernel->launch(&host_ctx);
+            loaded_kernels.get_b_kernel->launch(&host_ctx);
 
             // matmul_edge(mul_ans, v, edges)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_mul_ans, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_v, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 2, devalloc_edges, N_EDGES, 2, 1);
-            matmul_edge_kernel->launch(&host_ctx);
+            loaded_kernels.matmul_edge_kernel->launch(&host_ctx);
             // add(r0, b, -1, mul_ans)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_r0, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_b, N_VERTS, 3, 1);
             set_ctx_arg_float(host_ctx, 2, -1.0f);
             set_ctx_arg_devalloc(host_ctx, 3, devalloc_mul_ans, N_VERTS, 3, 1);
-            add_kernel->launch(&host_ctx);
+            loaded_kernels.add_kernel->launch(&host_ctx);
             // ndarray_to_ndarray(p0, r0)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_p0, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_r0, N_VERTS, 3, 1);
-            ndarray_to_ndarray_kernel->launch(&host_ctx);
+            loaded_kernels.ndarray_to_ndarray_kernel->launch(&host_ctx);
             // dot2scalar(r0, r0)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_r0, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_r0, N_VERTS, 3, 1);
-            dot2scalar_kernel->launch(&host_ctx);
+            loaded_kernels.dot2scalar_kernel->launch(&host_ctx);
             // init_r_2()
-            init_r_2_kernel->launch(&host_ctx);
+            loaded_kernels.init_r_2_kernel->launch(&host_ctx);
 
             int n_iter = 2;
 
@@ -337,35 +326,35 @@ void run_render_loop(float a_x = 0, float a_y = -9.8, float a_z = 0) {
                 set_ctx_arg_devalloc(host_ctx, 0, devalloc_mul_ans, N_VERTS, 3, 1);
                 set_ctx_arg_devalloc(host_ctx, 1, devalloc_p0, N_VERTS, 3, 1);
                 set_ctx_arg_devalloc(host_ctx, 2, devalloc_edges, N_EDGES, 2, 1);
-                matmul_edge_kernel->launch(&host_ctx);
+                loaded_kernels.matmul_edge_kernel->launch(&host_ctx);
                 // dot2scalar(p0, mul_ans)
                 set_ctx_arg_devalloc(host_ctx, 0, devalloc_p0, N_VERTS, 3, 1);
                 set_ctx_arg_devalloc(host_ctx, 1, devalloc_mul_ans, N_VERTS, 3, 1);
-                dot2scalar_kernel->launch(&host_ctx);
+                loaded_kernels.dot2scalar_kernel->launch(&host_ctx);
                 set_ctx_arg_devalloc(host_ctx, 0, devalloc_alpha_scalar, 1, 1, 1);
-                update_alpha_kernel->launch(&host_ctx);
+                loaded_kernels.update_alpha_kernel->launch(&host_ctx);
           		// add(v, v, alpha, p0)
           		set_ctx_arg_devalloc(host_ctx, 0, devalloc_v, N_VERTS, 3, 1);
           		set_ctx_arg_devalloc(host_ctx, 1, devalloc_v, N_VERTS, 3, 1);
           		set_ctx_arg_float(host_ctx, 2, 1.0f);
                 set_ctx_arg_devalloc(host_ctx, 3, devalloc_alpha_scalar, 1, 1, 1);
           		set_ctx_arg_devalloc(host_ctx, 4, devalloc_p0, N_VERTS, 3, 1);
-          		add_hack_kernel->launch(&host_ctx);
+          		loaded_kernels.add_hack_kernel->launch(&host_ctx);
 			    // add(r0, r0, -alpha, mul_ans)
                 set_ctx_arg_devalloc(host_ctx, 0, devalloc_r0, N_VERTS, 3, 1);
                 set_ctx_arg_devalloc(host_ctx, 1, devalloc_r0, N_VERTS, 3, 1);
                 set_ctx_arg_float(host_ctx, 2, -1.0f);
                 set_ctx_arg_devalloc(host_ctx, 3, devalloc_alpha_scalar, 1, 1, 1);
                 set_ctx_arg_devalloc(host_ctx, 4, devalloc_mul_ans, N_VERTS, 3, 1);
-                add_hack_kernel->launch(&host_ctx);
+                loaded_kernels.add_hack_kernel->launch(&host_ctx);
 
                 // r_2_new = dot(r0, r0)
                 set_ctx_arg_devalloc(host_ctx, 0, devalloc_r0, N_VERTS, 3, 1);
                 set_ctx_arg_devalloc(host_ctx, 1, devalloc_r0, N_VERTS, 3, 1);
-                dot2scalar_kernel->launch(&host_ctx);
+                loaded_kernels.dot2scalar_kernel->launch(&host_ctx);
 
                 set_ctx_arg_devalloc(host_ctx, 0, devalloc_beta_scalar, 1, 1, 1);
-                update_beta_r_2_kernel->launch(&host_ctx);
+                loaded_kernels.update_beta_r_2_kernel->launch(&host_ctx);
 
 
                 // add(p0, r0, beta, p0)
@@ -374,25 +363,25 @@ void run_render_loop(float a_x = 0, float a_y = -9.8, float a_z = 0) {
                 set_ctx_arg_float(host_ctx, 2, 1.0f);
                 set_ctx_arg_devalloc(host_ctx, 3, devalloc_beta_scalar, 1, 1, 1);
                 set_ctx_arg_devalloc(host_ctx, 4, devalloc_p0, N_VERTS, 3, 1);
-                add_hack_kernel->launch(&host_ctx);
+                loaded_kernels.add_hack_kernel->launch(&host_ctx);
             }
 
             // fill_ndarray(f, 0)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_f, N_VERTS, 3, 1);
             set_ctx_arg_float(host_ctx, 1, 0);
-            fill_ndarray_kernel->launch(&host_ctx);
+            loaded_kernels.fill_ndarray_kernel->launch(&host_ctx);
 
             // add(x, x, dt, v)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_x, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_x, N_VERTS, 3, 1);
             set_ctx_arg_float(host_ctx, 2, dt);
             set_ctx_arg_devalloc(host_ctx, 3, devalloc_v, N_VERTS, 3, 1);
-            add_kernel->launch(&host_ctx);
+            loaded_kernels.add_kernel->launch(&host_ctx);
         }
         // floor_bound(x, v)
         set_ctx_arg_devalloc(host_ctx, 0, devalloc_x, N_VERTS, 3, 1);
         set_ctx_arg_devalloc(host_ctx, 1, devalloc_v, N_VERTS, 3, 1);
-        floor_bound_kernel->launch(&host_ctx);
+        loaded_kernels.floor_bound_kernel->launch(&host_ctx);
         vulkan_runtime->synchronize();
 #ifdef ONLY_INIT
         set_ctx_arg_devalloc(host_ctx, 0, devalloc_x, N_VERTS, 3, 1);
@@ -400,7 +389,7 @@ void run_render_loop(float a_x = 0, float a_y = -9.8, float a_z = 0) {
         set_ctx_arg_devalloc(host_ctx, 2, devalloc_f, N_VERTS, 3, 1);
         set_ctx_arg_devalloc(host_ctx, 3, devalloc_ox, N_VERTS, 3, 1);
         set_ctx_arg_devalloc(host_ctx, 4, devalloc_vertices, N_CELLS, 4, 1);
-        init_kernel->launch(&host_ctx);
+        loaded_kernels.init_kernel->launch(&host_ctx);
         print_debug(vulkan_runtime, devalloc_x, 0);
 #endif
         // Render elements
