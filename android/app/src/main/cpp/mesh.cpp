@@ -31,9 +31,9 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_init(JNIEnv *env,
   native_window = ANativeWindow_fromSurface(env, surface);
 
   run_init(
-    /*width=*/ANativeWindow_getWidth(native_window), 
-    /*height=*/ANativeWindow_getHeight(native_window), 
-    "/data/local/tmp/", 
+    /*width=*/ANativeWindow_getWidth(native_window),
+    /*height=*/ANativeWindow_getHeight(native_window),
+    "/data/local/tmp/",
     native_window);
 #if 0
   // Sanity check to make sure the shaders are running properly, we should have
@@ -84,10 +84,9 @@ Java_com_innopeaktech_naboo_taichi_1test_NativeLib_render(JNIEnv *env,
                                                           float g_z
                                                           ) {
   ALOGI("Acceleration: g_x = %f, g_y = %f, g_z = %f", g_x, g_y, g_z);
-  float a_x = g_z;
+  float a_x = g_x > 2 || g_x < -2 ? -g_x * 4 : 0;
   float a_y = g_y > 2 || g_y < -2 ? -g_y : 0;
-  float a_z = g_x > 2 || g_x < -2 ? g_x * 4 : 0;
+  float a_z = g_z > 2 || g_z < -2 ? -g_z * 4 : 0;
 
-  // FIXME: add gravity
-  run_render_loop();
+  run_render_loop(a_x, a_y, a_z);
 }

@@ -279,7 +279,7 @@ void run_init(int width, int height, std::string path_prefix, taichi::ui::Taichi
 
     p_info.renderable_info = r_info;
     p_info.color = {1.0, 1.0, 1.0};
-    p_info.radius = 0.008;
+    p_info.radius = 0.004;
 
     camera.position = glm::vec3(0.0, 1.5, 2.95);
     camera.lookat = glm::vec3(0, 0, 0);
@@ -292,15 +292,15 @@ void run_init(int width, int height, std::string path_prefix, taichi::ui::Taichi
 }
 
 
-void run_render_loop() {
+void run_render_loop(float a_x = 0, float a_y = -9.8, float a_z = 0) {
         for (int i = 0; i < 4; i++) {
             // get_force(x, f, vertices)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_x, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 1, devalloc_f, N_VERTS, 3, 1);
             set_ctx_arg_devalloc(host_ctx, 2, devalloc_vertices, N_CELLS, 4, 1);
-            set_ctx_arg_float(host_ctx, 3, -3);
-            set_ctx_arg_float(host_ctx, 4, -9.8);
-            set_ctx_arg_float(host_ctx, 5, 0);
+            set_ctx_arg_float(host_ctx, 3, a_x);
+            set_ctx_arg_float(host_ctx, 4, a_y);
+            set_ctx_arg_float(host_ctx, 5, a_z);
             get_force_kernel->launch(&host_ctx);
             // get_b(v, b, f)
             set_ctx_arg_devalloc(host_ctx, 0, devalloc_v, N_VERTS, 3, 1);
@@ -330,7 +330,7 @@ void run_render_loop() {
             // init_r_2()
             init_r_2_kernel->launch(&host_ctx);
 
-            int n_iter = 10;
+            int n_iter = 2;
 
             for (int i = 0; i < n_iter; i++) {
                 // matmul_edge(mul_ans, p0, edges);
