@@ -180,12 +180,12 @@
           "field_dim": 1,
           "element_shape": [3],
           "shape_offset_in_args_buf": 0,
-          "bind_index": 0}}},"add_hack": {
+          "bind_index": 0}}},"add_scalar_ndarray": {
       "tasks": [{
           "type": "range_for",
           "range_hint": "",
-          "name": "add_hack_c66_0_k0014_vk_0_t00",
-          "source_path": "../shaders/aot/implicit_fem/add_hack_c66_0_k0014_vk_0_t00.spv",
+          "name": "add_scalar_ndarray_c66_0_k0014_vk_0_t00",
+          "source_path": "../shaders/aot/implicit_fem/add_scalar_ndarray_c66_0_k0014_vk_0_t00.spv",
           "gpu_block_size": 128,
           "buffer_binds": [{
               "buffer": {
@@ -284,20 +284,10 @@
           "shape_offset_in_args_buf": 0,
           "bind_index": 0}}},"init": {
       "tasks": [{
-          "type": "serial",
+          "type": "range_for",
           "range_hint": "",
           "name": "init_c84_0_k0008_vk_0_t00",
           "source_path": "../shaders/aot/implicit_fem/init_c84_0_k0008_vk_0_t00.spv",
-          "gpu_block_size": 1,
-          "buffer_binds": [{
-              "buffer": {
-                "type": 0,
-                "id": 0},
-              "binding": 2}]},{
-          "type": "range_for",
-          "range_hint": "",
-          "name": "init_c84_0_k0008_vk_1_t01",
-          "source_path": "../shaders/aot/implicit_fem/init_c84_0_k0008_vk_1_t01.spv",
           "gpu_block_size": 128,
           "buffer_binds": [{
               "buffer": {
@@ -310,8 +300,8 @@
               "binding": 0}]},{
           "type": "range_for",
           "range_hint": "",
-          "name": "init_c84_0_k0008_vk_2_t02",
-          "source_path": "../shaders/aot/implicit_fem/init_c84_0_k0008_vk_2_t02.spv",
+          "name": "init_c84_0_k0008_vk_1_t01",
+          "source_path": "../shaders/aot/implicit_fem/init_c84_0_k0008_vk_1_t01.spv",
           "gpu_block_size": 128,
           "buffer_binds": [{
               "buffer": {
@@ -526,4 +516,4 @@
           "bind_index": 0}}}},
   "kernel_tmpls": {},
   "fields": [],
-  "root_buffer_size": 122900}}
+  "root_buffer_size": 122888}}
