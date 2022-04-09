@@ -7,10 +7,6 @@
 #include <taichi/gui/gui.h>
 #include <taichi/inc/constants.h>
 #include <taichi/ui/backends/vulkan/renderer.h>
-constexpr int N_VERTS = 616;
-constexpr int N_CELLS = 1770;
-constexpr int N_FACES = 1138;
-constexpr int N_EDGES = 2954;
 constexpr float dt = 7.5e-3;
 
 //#define ONLY_INIT
